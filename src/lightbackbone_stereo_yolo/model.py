@@ -85,10 +85,21 @@ class StereoYoloLocalOutput:
 class StereoYoloLocalModel(nn.Module):
     """Batch-one inference assembly; empty detections bypass all local matching."""
 
-    def __init__(self, encoder: nn.Module, detector: StereoYoloHead, instance_head: StereoLocalInstanceHead, score_threshold: float = .05, pre_nms_topk: int = 500, detector_variant: str = "baseline", *, right_offset_mode: str = "legacy_clamp") -> None:
+    def __init__(
+        self, encoder: nn.Module, detector: StereoYoloHead, instance_head: StereoLocalInstanceHead,
+        score_threshold: float = .05, pre_nms_topk: int = 500, detector_variant: str = "baseline", *,
+        right_offset_mode: str = "legacy_clamp", apply_paired_nms: bool | None = None,
+        paired_nms_iou: float = .5,
+    ) -> None:
         super().__init__()
         self.encoder, self.detector, self.instance_head, self.score_threshold, self.pre_nms_topk, self.detector_variant = encoder, detector, instance_head, score_threshold, pre_nms_topk, detector_variant
         self.right_offset_mode = right_offset_mode
+        if apply_paired_nms is not None and detector_variant != "stereo_yolo26_pan":
+            raise ValueError("overriding paired NMS requires the stereo_yolo26_pan detector")
+        if not 0 <= paired_nms_iou <= 1:
+            raise ValueError("paired NMS IoU must be between 0 and 1")
+        self.apply_paired_nms = apply_paired_nms
+        self.paired_nms_iou = paired_nms_iou
 
     def forward(self, left: Tensor, right: Tensor) -> StereoYoloLocalOutput:
         if left.shape[0] != 1:
@@ -99,9 +110,11 @@ class StereoYoloLocalModel(nn.Module):
             locations = generate_point_locations(point_levels(pyramid), left.device)
             pair = decode_anchorfree_predictions(
                 {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
-                locations, self.score_threshold, pre_nms_topk=self.pre_nms_topk,
+                locations, self.score_threshold, nms_threshold=self.paired_nms_iou, pre_nms_topk=self.pre_nms_topk,
                 right_offset_mode=self.right_offset_mode,
-                apply_nms=not getattr(self.detector, "one_to_one_enabled", False),
+                apply_nms=(not getattr(self.detector, "one_to_one_enabled", False)
+                           if self.apply_paired_nms is None else self.apply_paired_nms),
+                class_aware_nms=self.apply_paired_nms is True,
             )
         elif self.detector_variant == "baseline":
             levels = (

@@ -268,6 +268,52 @@ class StereoOneToOneTest(unittest.TestCase):
         torch.testing.assert_close(result.boxes_right,torch.tensor([[1.,8.,21.,28.]]))
         self.assertEqual(result.classes.tolist(),[1])
 
+    def test_opt_in_nms_removes_entire_duplicate_before_instance_head(self):
+        from lightbackbone_stereo_yolo.detection import DenseStereoPredictions
+
+        class Encoder(torch.nn.Module):
+            def forward(self, left, right):
+                out = pyramid()
+                out.p2_left = out.p2_right = torch.ones(1, 8, 16, 16)
+                return out
+
+        pair = torch.tensor([[8., 8., 28., 28., 1., 21.]])
+
+        class Detector(torch.nn.Module):
+            one_to_one_enabled = True
+
+            def forward(self, features):
+                obj = torch.full((1, 84), -20.)
+                obj[0, [9, 10]] = torch.tensor([8., 6.])
+                cls = torch.zeros(1, 84, 2)
+                cls[0, [9, 10], 1] = 10.
+                box = torch.zeros(1, 84, 6)
+                points = torch.tensor([[12., 12., 8.], [20., 12., 8.]])
+                box[0, [9, 10]] = encode_anchorfree_boxes6(pair.expand(2, -1), points)
+                return DenseStereoPredictions(obj, cls, box)
+
+        class Instance(torch.nn.Module):
+            def forward(self, features, boxes, height, width):
+                self.received = boxes.clone()
+                z = boxes.new_zeros((len(boxes), 1, 1))
+                return SimpleNamespace(mask_logits=z, mask_validity=z.bool(), disparity=z,
+                                       validity=z.bool(), peak=z, entropy=z)
+
+        instance = Instance()
+        model = StereoYoloLocalModel(Encoder(), Detector(), instance, score_threshold=.25,
+                                     detector_variant="stereo_yolo26_pan").eval()
+        image = torch.zeros(1, 3, 64, 64)
+        before = model(image, image)
+        self.assertEqual(len(instance.received), 2)
+        model.apply_paired_nms = True
+        after = model(image, image)
+        torch.testing.assert_close(instance.received, pair)
+        torch.testing.assert_close(after.boxes_left, before.boxes_left[:1])
+        torch.testing.assert_close(after.boxes_right, before.boxes_right[:1])
+        torch.testing.assert_close(after.scores, before.scores[:1])
+        self.assertEqual(after.classes.tolist(), [1])
+        self.assertEqual(len(after.disparity), 1)
+
     def test_training_path_uses_both_branches_with_one_encoder_pass(self):
         self.assertIn("one_to_one", StereoYOLO26PanHead.__init__.__code__.co_varnames)
 

@@ -98,22 +98,30 @@ def detection_loss(predictions: dict[str, Tensor], targets: dict[str, Tensor]) -
     return {"loss_obj": loss_obj, "loss_cls": loss_cls, "loss_box6": loss_box6}
 
 
-def paired_nms(boxes6: Tensor, scores: Tensor, iou_threshold: float = .5) -> PairDetections:
-    order = scores.argsort(descending=True)
-    kept: list[int] = []
+def paired_nms(
+    boxes6: Tensor, scores: Tensor, iou_threshold: float = .5, *, classes: Tensor | None = None,
+) -> PairDetections:
+    """Suppress one whole pair only when both views overlap above the threshold."""
+    if not 0 <= iou_threshold <= 1:
+        raise ValueError("paired NMS IoU must be between 0 and 1")
+    order = scores.argsort(descending=True, stable=True)
+    kept: list[Tensor] = []
     right_boxes = torch.stack((boxes6[:, 4], boxes6[:, 1], boxes6[:, 5], boxes6[:, 3]), 1)
     while order.numel():
         current = order[0]
-        kept.append(int(current))
+        kept.append(current)
         if order.numel() == 1:
             break
         remain = order[1:]
-        # A pair survives only when its left and right boxes remain jointly distinct.
-        left = _iou(boxes6[current:current + 1, :4], boxes6[remain, :4]).squeeze(0)
-        right = _iou(right_boxes[current:current + 1], right_boxes[remain]).squeeze(0)
-        order = remain[torch.minimum(left, right) <= iou_threshold]
-    indices = torch.tensor(kept, device=boxes6.device, dtype=torch.long)
-    return PairDetections(boxes6[indices], scores[indices], indices)
+        left = _iou(boxes6[order[:1], :4], boxes6[remain, :4]).squeeze(0)
+        right = _iou(right_boxes[order[:1]], right_boxes[remain]).squeeze(0)
+        survives = torch.minimum(left, right) <= iou_threshold
+        if classes is not None:
+            survives |= classes[remain] != classes[current]
+        order = remain[survives]
+    indices = torch.stack(kept) if kept else order
+    return PairDetections(boxes6[indices], scores[indices], indices,
+                          classes[indices] if classes is not None else None)
 
 
 def decode_dense_predictions(
@@ -290,24 +298,35 @@ def anchorfree_candidate_indices(scores: Tensor, score_threshold: float, pre_nms
     score_indices = (scores >= score_threshold).nonzero().flatten()
     topk_indices = score_indices
     if pre_nms_topk > 0 and score_indices.numel() > pre_nms_topk:
-        topk_indices = score_indices[scores[score_indices].topk(pre_nms_topk).indices]
+        # nonzero supplies ascending dense IDs, including ties at the cutoff.
+        order = scores[score_indices].argsort(descending=True, stable=True)
+        topk_indices = score_indices[order[:pre_nms_topk]]
     return score_indices, topk_indices
 
 
 def suppress_anchorfree_candidates(
     decoded: Tensor, indices: Tensor, scores: Tensor, classes: Tensor, nms_threshold: float,
-    *, apply_nms: bool = True,
+    *, apply_nms: bool = True, class_aware_nms: bool = False,
 ) -> tuple[PairDetections, PairDetections]:
     # Finite encoded values can still overflow in expm1 or sinh.
     valid = torch.isfinite(decoded).all(dim=1)
     indices = indices[valid]
     pre = PairDetections(decoded[valid], scores[indices], indices, classes[indices])
+    return select_anchorfree_pairs(pre, nms_threshold, apply_nms=apply_nms,
+                                   class_aware_nms=class_aware_nms), pre
+
+
+def select_anchorfree_pairs(
+    pre: PairDetections, nms_threshold: float, *, apply_nms: bool, class_aware_nms: bool = False,
+) -> PairDetections:
+    """Run both ablation arms from the same valid pre-NMS pool."""
     if not apply_nms:
         order = pre.scores.argsort(descending=True, stable=True)
-        return PairDetections(pre.boxes6[order], pre.scores[order], pre.indices[order], pre.classes[order]), pre
-    kept = paired_nms(pre.boxes6, pre.scores, nms_threshold)
-    final = PairDetections(kept.boxes6, kept.scores, indices[kept.indices], pre.classes[kept.indices])
-    return final, pre
+    else:
+        order = paired_nms(pre.boxes6, pre.scores, nms_threshold,
+                           classes=pre.classes if class_aware_nms else None).indices
+    classes = pre.classes[order] if pre.classes is not None else None
+    return PairDetections(pre.boxes6[order], pre.scores[order], pre.indices[order], classes)
 
 
 def decode_anchorfree_predictions(
@@ -319,6 +338,7 @@ def decode_anchorfree_predictions(
     *,
     right_offset_mode: str = "legacy_clamp",
     apply_nms: bool = True,
+    class_aware_nms: bool = False,
 ) -> PairDetections:
     """Decode aligned stereo pairs, optionally applying pair-preserving NMS."""
     from .geometry import decode_anchorfree_boxes6
@@ -330,5 +350,7 @@ def decode_anchorfree_predictions(
     decoded = decode_anchorfree_boxes6(
         predictions["box6"].reshape(-1, 6)[chosen], locations[chosen], right_offset_mode=right_offset_mode,
     )
-    final, _ = suppress_anchorfree_candidates(decoded, chosen, scores, classes, nms_threshold, apply_nms=apply_nms)
+    final, _ = suppress_anchorfree_candidates(
+        decoded, chosen, scores, classes, nms_threshold, apply_nms=apply_nms, class_aware_nms=class_aware_nms,
+    )
     return final

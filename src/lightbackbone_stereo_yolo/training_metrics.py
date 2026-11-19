@@ -24,7 +24,27 @@ def _pairwise_iou(first: Tensor, second: Tensor) -> Tensor:
     return inter/(area_first[:,None]+area_second[None,:]-inter).clamp_min(1e-8)
 
 
-def greedy_match_paired_detections(predictions: Tensor, targets: Tensor, scores: Tensor, minimum_quality: float=.5) -> PairedMatch:
+def paired_match_eligibility(
+    predictions: Tensor, targets: Tensor, minimum_quality: float, *,
+    prediction_classes: Tensor | None = None, target_classes: Tensor | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Return min bilateral IoU and the same-GT eligibility mask."""
+    pl, pr = pair_boxes_to_lr(predictions)
+    tl, tr = pair_boxes_to_lr(targets)
+    quality = torch.minimum(_pairwise_iou(pl, tl), _pairwise_iou(pr, tr))
+    eligible = quality >= minimum_quality
+    if prediction_classes is not None or target_classes is not None:
+        if (prediction_classes is None or target_classes is None
+                or prediction_classes.shape != (len(predictions),) or target_classes.shape != (len(targets),)):
+            raise ValueError("both class tensors must align with their paired boxes")
+        eligible &= prediction_classes[:, None] == target_classes[None, :]
+    return quality, eligible
+
+
+def greedy_match_paired_detections(
+    predictions: Tensor, targets: Tensor, scores: Tensor, minimum_quality: float = .5, *,
+    prediction_classes: Tensor | None = None, target_classes: Tensor | None = None,
+) -> PairedMatch:
     """Greedy one-to-one match sorted by min(left IoU, right IoU), then score."""
     if predictions.ndim!=2 or predictions.shape[1]!=6 or targets.ndim!=2 or targets.shape[1]!=6:
         raise ValueError("paired boxes must have shape [N, 6]")
@@ -33,11 +53,12 @@ def greedy_match_paired_detections(predictions: Tensor, targets: Tensor, scores:
     if not predictions.numel() or not targets.numel():
         empty=torch.empty(0,dtype=torch.long,device=predictions.device)
         return PairedMatch(empty,empty, predictions.new_empty(0),0,targets.shape[0])
-    pl,pr=pair_boxes_to_lr(predictions)
-    tl,tr=pair_boxes_to_lr(targets)
-    quality=torch.minimum(_pairwise_iou(pl,tl),_pairwise_iou(pr,tr))
+    quality, eligible = paired_match_eligibility(
+        predictions, targets, minimum_quality,
+        prediction_classes=prediction_classes, target_classes=target_classes,
+    )
     candidates=[]
-    for prediction_index,target_index in (quality>=minimum_quality).nonzero().tolist():
+    for prediction_index,target_index in eligible.nonzero().tolist():
         candidates.append((float(quality[prediction_index,target_index]),float(scores[prediction_index]),prediction_index,target_index))
     candidates.sort(key=lambda item:(-item[0],-item[1],item[2],item[3]))
     used_predictions=set(); used_targets=set(); kept=[]

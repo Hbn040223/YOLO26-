@@ -21,6 +21,25 @@ python scripts/infer.py --openstereo-source OpenStereo \
 
 Use a rectified left/right pair with equal image dimensions. The released checkpoint already provides the backbone weights. Inference defaults to score 0.40 and pre-top-k 500 with the one-to-one detector. The NPZ contains aligned `boxes_left`, `boxes_right`, scores, classes, the per-pair absolute disparity in original-image pixels, the disparity validity mask, and the continuous crop geometry. Mask probabilities are in `mask_probability`. Given a disparity array index `(v,u)`, its left-image grid center is `(c_l + (u+0.5)*c/w_roi, y0 + (v+0.5)*h_crop/h_roi)`.
 
+Append `--paired-nms --paired-nms-iou .5` to try class-aware stereo suppression. With the flag omitted, the published one-to-one model still skips NMS. When enabled, a lower-scoring pair is removed only if its class matches and both view IoUs exceed the NMS threshold. The kept pair indices stay aligned through RoI, mask, and disparity. Ties in anchor-free top-k and NMS prefer the original dense candidate order.
+
+### Paired NMS on/off evaluation
+
+Use the same checkpoint and KITTI validation split in both arms. The evaluator captures a dense candidate archive before score filtering/top-k, then replays NMS off and each IoU on the same pre-NMS pool at every score threshold:
+
+```bash
+python scripts/evaluate_paired_nms.py --openstereo-source OpenStereo \
+  --dataset-root /path/to/KITTI --split-json /path/to/validation.json \
+  --device cuda:0 --scores .05,.10,.15,.25,.30,.35,.40 \
+  --nms-ious .5,.6,.7 --topk 500 \
+  --save-candidates paired_candidates.json --output paired_nms_eval.json
+
+python scripts/evaluate_paired_nms.py --candidates paired_candidates.json \
+  --scores .25,.40 --nms-ious .5,.6,.7 --output paired_nms_replay.json
+```
+
+The report records checkpoint and split hashes, score distributions, pair counts, duplicates, kept dense IDs, one-to-one coverage/precision, and paired frame bootstrap intervals for on-minus-off differences. Matching is quality-first with both views required to hit the same GT. Use `--class-agnostic-matching` to compare with historical matcher semantics while keeping suppression class-aware. The NMS IoU and GT matching IoU are separate settings. Choose an operating point on validation data subject to an agreed coverage loss, then confirm it on held-out data and time full inference before changing the release default. Pair count measures RoI workload. End-to-end latency and Mask/iDisp accuracy require separate measurement.
+
 ## Evaluation
 
 The 40-frame KITTI validation experiment uses the same frozen B2a pairs for both local disparity configurations. Prediction-driven EPE and D1 are measured on common GT foreground pixels. Accuracy below averages seeds 17, 2 and 5 at epoch 20. Timing includes all 2,323 retained pairs and the Mask branch, measured on an RTX 6000 Ada using seed 17.
