@@ -69,3 +69,29 @@ python scripts/benchmark_paired_nms.py --openstereo-source OpenStereo \
   --device cuda:0 --score .40 --topk 500 --nms-iou .7 \
   --warmup 2 --repeats 3 --replay e20_replay.json --output e20_benchmark.json
 ```
+
+## Full PNG-to-NPZ pipeline measurement
+
+A second run on November 20, 2026 used PR commit `258cb60` and the same E20 checkpoint and 40-frame split. On a shared RTX 6000 Ada (GPU 3), both configurations used FP32, batch 1, two CPU threads and 120 timed forwards per arm. Arms alternated over three repeats per input. Each timed call reads and normalizes both PNGs, transfers the images, runs detection, RoI, Mask and iDisp, transfers the outputs and closes the compressed NPZ file. Model initialization, warmup and GT scoring are outside per-frame timing. The dataset reader accessed images outside timing for scoring, so the timing represents a warmed filesystem cache. The export uses ordinary file close without fsync.
+
+| Stage | Off P50 | Off P95 | IoU 0.70 P50 | IoU 0.70 P95 |
+|---|---:|---:|---:|---:|
+| Read and normalize PNGs | 30.64 ms | 41.17 ms | 31.46 ms | 41.90 ms |
+| CPU to GPU transfer | 1.04 ms | 1.86 ms | 1.03 ms | 1.65 ms |
+| Full model forward | 118.49 ms | 294.04 ms | 265.77 ms | 936.40 ms |
+| GPU to CPU and compressed NPZ save | 333.34 ms | 1314.70 ms | 213.99 ms | 1380.99 ms |
+| Total PNG-to-NPZ | 526.67 ms | 1560.49 ms | 668.18 ms | 1757.98 ms |
+
+| Accuracy | Off | IoU 0.70 |
+|---|---:|---:|
+| Kept pairs | 2,323 | 863 |
+| Paired matches | 156 / 287 | 151 / 287 |
+| Paired precision | 6.72% | 17.50% |
+| GT with usable disparity | 154 / 287 | 150 / 287 |
+| Cars <10 m with usable disparity | 19 / 23 | 19 / 23 |
+| EPE on each arm's matched foreground | 2.548 px | 2.371 px |
+| D1 on each arm's matched foreground | 19.88% | 19.48% |
+| EPE on shared foreground pixels | 2.443 px | 2.371 px |
+| Mean Mask IoU on each arm's matches | 0.3023 | 0.3065 |
+
+Usable disparity requires a paired hit, finite disparity and at least 85% coverage of the annotated foreground. Both arms reproduced the original per-frame paired-hit identities and kept-pair counts. All 80 saved NPZ files passed archive and shape checks. On this run NMS reduces the mean output size from 753 to 282 KiB. It also increases total latency at both measured percentiles and loses five matched GTs. The timing suites in this section and the preceding CUDA section have different measurement boundaries and server load.
