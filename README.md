@@ -63,3 +63,5 @@ The 40-frame KITTI validation experiment uses the same frozen B2a pairs for both
 | Peak allocated GPU memory | 2,972 MiB | 1,319 MiB |
 
 See [the full evaluation report](evaluation/summary.json). Training and evaluation entry points remain in `scripts/`. KITTI data is obtained separately.
+
+[Real KITTI E20 paired-NMS validation](docs/paired_nms_e20_validation.md).
