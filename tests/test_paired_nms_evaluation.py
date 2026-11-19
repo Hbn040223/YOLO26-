@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import unittest
+from types import SimpleNamespace
 
 import torch
 
@@ -9,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "src")]
 
 from evaluate_paired_nms import evaluate
+from benchmark_paired_nms import benchmark
 from lightbackbone_stereo_yolo.detection import anchorfree_candidate_indices, paired_nms
 from lightbackbone_stereo_yolo.training_metrics import greedy_match_paired_detections
 
@@ -60,6 +62,37 @@ class PairedNmsEvaluationTest(unittest.TestCase):
         self.assertEqual(after["lost_gt_count"], 0)
         self.assertEqual(sum(report["score_histogram"]["eligible_for_same_gt"]), 2)
         self.assertIn("coverage", after["paired_bootstrap_delta_95ci"])
+
+    def test_benchmark_pairs_runs_and_handles_empty_instance_path(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.detector = torch.nn.Identity()
+                self.instance_head = torch.nn.Identity()
+                self.apply_paired_nms = None
+                self.calls = []
+
+            def forward(self, left, right):
+                detected = self.detector(left)
+                self.calls.append(self.apply_paired_nms)
+                count = 0 if self.apply_paired_nms else 2
+                if count:
+                    self.instance_head(detected)
+                return SimpleNamespace(scores=left.new_zeros(count))
+
+        model = Model().eval()
+        image = torch.zeros(3, 4, 4)
+        data = [{"frame_id": "a", "left": image, "right": image}]
+        report = benchmark(model, data, "cpu", warmup=1, repeats=2)
+        self.assertEqual(model.calls, [False, True, False, True, True, False])
+        self.assertIsNone(model.apply_paired_nms)
+        self.assertEqual(report["paired_timing_samples"], 2)
+        self.assertEqual(report["summary"]["off"]["pairs_per_forward"]["p50"], 2)
+        self.assertEqual(report["summary"]["on"]["instance_head_ms"]["p95"], 0.)
+        self.assertEqual(report["summary"]["on_minus_off"]["pairs"]["p50"], -2)
+        self.assertGreater(report["summary"]["off"]["end_to_end_ms"]["p50"], 0.)
+        self.assertFalse(model.detector._forward_hooks)
+        self.assertFalse(model.instance_head._forward_pre_hooks)
 
 
 if __name__ == "__main__":

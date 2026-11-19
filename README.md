@@ -38,7 +38,18 @@ python scripts/evaluate_paired_nms.py --candidates paired_candidates.json \
   --scores .25,.40 --nms-ious .5,.6,.7 --output paired_nms_replay.json
 ```
 
-The report records checkpoint and split hashes, score distributions, pair counts, duplicates, kept dense IDs, one-to-one coverage/precision, and paired frame bootstrap intervals for on-minus-off differences. Matching is quality-first with both views required to hit the same GT. Use `--class-agnostic-matching` to compare with historical matcher semantics while keeping suppression class-aware. The NMS IoU and GT matching IoU are separate settings. Choose an operating point on validation data subject to an agreed coverage loss, then confirm it on held-out data and time full inference before changing the release default. Pair count measures RoI workload. End-to-end latency and Mask/iDisp accuracy require separate measurement.
+The report records checkpoint and split hashes, score distributions, pair counts, duplicates, kept dense IDs, one-to-one coverage/precision, and paired frame bootstrap intervals for on-minus-off differences. Matching is quality-first with both views required to hit the same GT. Use `--class-agnostic-matching` to compare with historical matcher semantics while keeping suppression class-aware. The NMS IoU and GT matching IoU are separate settings. Both evaluation and timing fail on missing assets referenced by the split's annotations so the cohort cannot silently shrink.
+
+Choose an operating point on validation data subject to an agreed coverage loss, then confirm it on held-out data and measure full model latency. Keep the score, top-K, checkpoint and split consistent between the offline comparison and the benchmark. For example:
+
+```bash
+python scripts/benchmark_paired_nms.py --openstereo-source OpenStereo \
+  --dataset-root /path/to/KITTI --split-json /path/to/validation.json \
+  --device cuda:0 --score .40 --topk 500 --nms-iou .5 \
+  --warmup 2 --repeats 3 --output paired_nms_timing.json
+```
+
+Timing runs both arms on each stereo input in alternating order, using batch-one forwards and CUDA synchronization. P50/P95 end-to-end latency excludes input loading, transfer, and output export. Stage timings include decode and RoI dispatch (including optional NMS) and the instance head (RoI, Mask, and iDisp). Empty outputs skip the instance head. Positive on-minus-off latency means the NMS arm took longer. Pair counts show RoI workload; Mask/iDisp accuracy requires separate evaluation.
 
 ## Evaluation
 

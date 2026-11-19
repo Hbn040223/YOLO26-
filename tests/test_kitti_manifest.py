@@ -42,6 +42,10 @@ class KittiLabelContractTest(unittest.TestCase):
             self.assertEqual(record.left_box, (1., 2., 4., 6.))
             self.assertTrue(record.right_image.exists())
             self.assertEqual(record.instance_value, 9001)
+            record.right_image.unlink()
+            self.assertFalse(build_kitti_manifest(root, source))
+            with self.assertRaisesRegex(FileNotFoundError, "image_3"):
+                build_kitti_manifest(root, source, require_files=True)
 
     def test_right_box_uses_valid_left_instance_pixels_projected_by_disparity(self) -> None:
         self.assertIsNotNone(project_right_box)

@@ -31,7 +31,9 @@ class KittiInstanceTarget:
     category_id: int
 
 
-def build_kitti_manifest(root: str | Path, annotation_json: str | Path) -> list[KittiManifestRecord]:
+def build_kitti_manifest(
+    root: str | Path, annotation_json: str | Path, *, require_files: bool = False,
+) -> list[KittiManifestRecord]:
     """Validate supplied COCO-style RPN split records against KITTI2015 assets."""
     root = Path(root)
     payload = json.loads(Path(annotation_json).read_text())
@@ -42,7 +44,10 @@ def build_kitti_manifest(root: str | Path, annotation_json: str | Path) -> list[
         left = root / image["file_name"]
         stem = left.stem
         paths = (left, root / "training/image_3" / left.name, root / "training/instance" / left.name, root / "training/disp_occ_0" / left.name, root / image["ignore_mask_file"])
-        if not all(path.is_file() for path in paths):
+        missing = [path for path in paths if not path.is_file()]
+        if missing:
+            if require_files:
+                raise FileNotFoundError(f"{stem}: missing KITTI assets: {', '.join(map(str, missing))}")
             continue
         x, y, width, height = annotation["bbox"]
         records.append(KittiManifestRecord(stem, *paths, int(annotation["category_id"]), int(annotation["source_instance_value"]), (float(x), float(y), float(x + width), float(y + height))))

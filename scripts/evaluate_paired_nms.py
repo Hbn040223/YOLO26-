@@ -32,16 +32,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def validation_dataset(dataset_root, split_json, bundle):
+    normalization = bundle["normalization"]
+    return KittiFrameDataset(
+        build_frame_records(dataset_root, split_json, require_files=True), bundle["class_mapping"],
+        mean=normalization["mean"], std=normalization["std"], unknown_class="skip",
+    )
+
+
 @torch.inference_mode()
 def capture_candidates(args) -> dict:
     model, bundle = load_published_model(args.weights, args.openstereo_source, args.device)
     if model.detector_variant != "stereo_yolo26_pan":
         raise ValueError("paired NMS evaluation requires stereo_yolo26_pan")
-    normalization = bundle["normalization"]
-    dataset = KittiFrameDataset(
-        build_frame_records(args.dataset_root, args.split_json), bundle["class_mapping"],
-        mean=normalization["mean"], std=normalization["std"], unknown_class="skip",
-    )
+    dataset = validation_dataset(args.dataset_root, args.split_json, bundle)
     frames = []
     for sample in dataset:
         left, right = (sample[side].unsqueeze(0).to(args.device) for side in ("left", "right"))
