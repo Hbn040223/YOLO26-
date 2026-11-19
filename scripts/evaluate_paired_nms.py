@@ -13,8 +13,12 @@ from lightbackbone_stereo_yolo.data.frame_dataset import KittiFrameDataset, buil
 from lightbackbone_stereo_yolo.detection import (
     PairDetections, anchorfree_candidate_indices, anchorfree_prediction_scores, select_anchorfree_pairs,
 )
-from lightbackbone_stereo_yolo.geometry import decode_anchorfree_boxes6, generate_point_locations, point_levels
-from lightbackbone_stereo_yolo.training_metrics import greedy_match_paired_detections, paired_match_eligibility
+from lightbackbone_stereo_yolo.geometry import (
+    decode_anchorfree_boxes6, generate_point_locations, pair_boxes_to_lr, point_levels,
+)
+from lightbackbone_stereo_yolo.training_metrics import (
+    _pairwise_iou, greedy_match_paired_detections, paired_match_eligibility,
+)
 
 
 def probabilities(value: str) -> list[float]:
@@ -79,12 +83,36 @@ def capture_candidates(args) -> dict:
 def counts(pairs, targets, target_classes, gt_iou, class_aware):
     labels = ({"prediction_classes": pairs.classes, "target_classes": target_classes} if class_aware else {})
     paired = greedy_match_paired_detections(pairs.boxes6, targets, pairs.scores, gt_iou, **labels)
-    _, eligible = paired_match_eligibility(pairs.boxes6, targets, gt_iou, **labels)
+    quality, eligible = paired_match_eligibility(pairs.boxes6, targets, gt_iou, **labels)
+    qualifying = eligible.any(1)
+    owned = torch.zeros(len(targets), dtype=torch.long, device=targets.device)
+    if qualifying.any():
+        # Ownership is independent of the one-to-one TP assignment. The first
+        # maximum is the fixed GT-row tie-break.
+        owners = quality[qualifying].masked_fill(~eligible[qualifying], float("-inf")).argmax(1)
+        owned = torch.bincount(owners, minlength=len(targets))
+    duplicates = (owned - 1).clamp_min(0)
+    overlapping = (_pairwise_iou(targets[:, :4], targets[:, :4]) > 0)
+    overlapping.fill_diagonal_(False)
+    overlapping &= target_classes[:, None] == target_classes[None, :]
     return {
         "pairs": len(pairs.indices), "gt": len(targets), "hits": paired.matched_count,
-        "duplicates": int(eligible.any(1).sum()) - paired.matched_count,
-        "matched_gt_ids": paired.target_indices.tolist(), "kept_dense_ids": pairs.indices.tolist(),
+        "duplicates": int(duplicates.sum()), "overlap_gt_duplicates": int(duplicates[overlapping.any(1)].sum()),
+        "overlap_gt": int(overlapping.any(1).sum()),
+        "matched_gt_ids": paired.target_indices.tolist(),
+        "matched_dense_ids": pairs.indices[paired.prediction_indices].tolist(),
+        "kept_dense_ids": pairs.indices.tolist(),
     }
+
+
+def single_view_hits(boxes, targets, gt_iou):
+    # This preserves the existing class-agnostic left recall definition.
+    pred_left, pred_right = pair_boxes_to_lr(boxes)
+    gt_left, gt_right = pair_boxes_to_lr(targets)
+    return (
+        int((_pairwise_iou(pred_left, gt_left) >= gt_iou).any(0).sum()),
+        int((_pairwise_iou(pred_right, gt_right) >= gt_iou).any(0).sum()),
+    )
 
 
 def evaluate(cache, scores, nms_ious, topk, gt_iou, *, class_aware=True, bootstrap=1000):
@@ -116,12 +144,14 @@ def evaluate(cache, scores, nms_ious, topk, gt_iou, *, class_aware=True, bootstr
             selected, ids = anchorfree_candidate_indices(values, score, topk)
             valid_ids = ids[valid[ids]]
             pre = PairDetections(boxes[valid_ids], values[valid_ids], valid_ids, classes[valid_ids])
+            left_hits, right_hits = single_view_hits(pre.boxes6, targets, gt_iou)
             for iou in arms:
                 picked = select_anchorfree_pairs(pre, .5 if iou is None else iou,
                                                  apply_nms=iou is not None, class_aware_nms=True)
                 rows[score, iou].append({
                     "frame_id": frame_id, "after_score": len(selected), "after_topk": len(ids),
-                    "pre_nms_dense_ids": valid_ids.tolist(), **counts(picked, targets, target_classes, gt_iou, class_aware),
+                    "pre_nms_dense_ids": valid_ids.tolist(), "pre_nms_left_hits": left_hits,
+                    "pre_nms_right_hits": right_hits, **counts(picked, targets, target_classes, gt_iou, class_aware),
                 })
     draws = torch.randint(len(frame_ids), (bootstrap, len(frame_ids)), generator=torch.Generator().manual_seed(17))
 
@@ -139,6 +169,10 @@ def evaluate(cache, scores, nms_ious, topk, gt_iou, *, class_aware=True, bootstr
         result = {
             "score_threshold": score, "nms_iou": iou, "gt": gt, "pairs": pairs, "hits": hits,
             "duplicates": duplicates, "coverage": hits / max(1, gt), "precision": hits / max(1, pairs),
+            "overlap_gt": sum(row["overlap_gt"] for row in frames),
+            "overlap_gt_duplicates": sum(row["overlap_gt_duplicates"] for row in frames),
+            "pre_nms_left_hits": sum(row["pre_nms_left_hits"] for row in frames),
+            "pre_nms_right_hits": sum(row["pre_nms_right_hits"] for row in frames),
             "frames": frames,
         }
         if iou is not None:
@@ -154,7 +188,13 @@ def evaluate(cache, scores, nms_ious, topk, gt_iou, *, class_aware=True, bootstr
         "source": {key: value for key, value in cache.items() if key != "frames"},
         "protocol": {"matcher": "quality_first", "class_aware_matching": class_aware,
                      "class_aware_nms": True, "gt_joint_iou": gt_iou, "pre_nms_topk": topk,
-                     "bootstrap_frames": bootstrap, "bootstrap_seed": 17},
+                     "bootstrap_frames": bootstrap, "bootstrap_seed": 17,
+                     "single_view_recall_matching": "class_agnostic",
+                     "duplicate_ownership": "max_eligible_joint_iou_then_lowest_gt_row",
+                     "overlap_gt": "same_class_with_positive_left_iou",
+                     "prediction_denominator": "all_kept_pairs",
+                     "ground_truth_denominator": "valid_paired_annotations_from_manifest",
+                     "final_pair_cap": None},
         "score_histogram": {"edges": [i / 10 for i in range(11)],
                             "eligible_for_same_gt": hist[0].tolist(), "other_valid": hist[1].tolist()},
         "settings": settings,

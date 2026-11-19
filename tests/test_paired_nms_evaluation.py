@@ -63,6 +63,36 @@ class PairedNmsEvaluationTest(unittest.TestCase):
         self.assertEqual(sum(report["score_histogram"]["eligible_for_same_gt"]), 2)
         self.assertIn("coverage", after["paired_bootstrap_delta_95ci"])
 
+    def test_duplicate_ownership_is_independent_of_greedy_tp_assignment(self):
+        gt_a = [0., 0., 10., 10., 0., 10.]
+        gt_b = [2., 0., 12., 10., 2., 12.]
+        cache = {"schema": "anchorfree-pre-score-v1", "frames": [{
+            "frame_id": "overlapping", "boxes6": [gt_a, gt_a], "scores": [.9, .8],
+            "classes": [0, 0], "gt_boxes6": [gt_a, gt_b], "gt_classes": [0, 0],
+        }]}
+        off, on = evaluate(cache, [.40], [.5], 500, .5, bootstrap=0)["settings"]
+        # Greedy one-to-one can match both GTs. Both candidates prefer GT A.
+        self.assertEqual(off["hits"], 2)
+        self.assertEqual(off["duplicates"], 1)
+        self.assertEqual(off["overlap_gt_duplicates"], 1)
+        self.assertEqual(on["duplicates"], 0)
+        self.assertEqual(on["lost_gt_count"], 1)
+
+    def test_pre_nms_single_view_recall_survives_paired_suppression(self):
+        gt = [0., 0., 10., 10., 0., 10.]
+        left_only = [0., 0., 10., 10., 18., 28.]
+        cache = {"schema": "anchorfree-pre-score-v1", "frames": [{
+            "frame_id": "left_only", "boxes6": [left_only, left_only], "scores": [.9, .8],
+            "classes": [0, 0], "gt_boxes6": [gt], "gt_classes": [0],
+        }]}
+        off, on = evaluate(cache, [.40], [.5], 500, .5, bootstrap=0)["settings"]
+        for setting in (off, on):
+            self.assertEqual(setting["pre_nms_left_hits"], 1)
+            self.assertEqual(setting["pre_nms_right_hits"], 0)
+            self.assertEqual(setting["hits"], 0)
+        self.assertEqual(on["frames"][0]["pre_nms_dense_ids"], [0, 1])
+        self.assertEqual(on["frames"][0]["kept_dense_ids"], [0])
+
     def test_benchmark_pairs_runs_and_handles_empty_instance_path(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -89,6 +119,7 @@ class PairedNmsEvaluationTest(unittest.TestCase):
         self.assertEqual(report["paired_timing_samples"], 2)
         self.assertEqual(report["summary"]["off"]["pairs_per_forward"]["p50"], 2)
         self.assertEqual(report["summary"]["on"]["instance_head_ms"]["p95"], 0.)
+        self.assertEqual(report["summary"]["off"]["paired_nms_ms"]["p95"], 0.)
         self.assertEqual(report["summary"]["on_minus_off"]["pairs"]["p50"], -2)
         self.assertGreater(report["summary"]["off"]["end_to_end_ms"]["p50"], 0.)
         self.assertFalse(model.detector._forward_hooks)
