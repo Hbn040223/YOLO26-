@@ -1,0 +1,28 @@
+# Python build and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Training outputs and experiment artifacts
+runs/
+outputs/
+checkpoints/
+weights/
+*.ckpt
+*.pt
+*.pth
+
+# Local environment files
+.venv/
+venv/
+.env
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Published inference checkpoint
+!/models/stereo-yolo26-fixed56-seed17-e20.pt

@@ -1,0 +1,548 @@
+{
+  "seeds": [
+    {
+      "seed": 17,
+      "bins": {
+        "native_pad": 63,
+        "fixed_56": 33
+      },
+      "targets": 287,
+      "matches": 157,
+      "near_targets": 23,
+      "near_matches": 19,
+      "unknown_distance_cars": 0,
+      "gt": {
+        "native_pad": {
+          "foreground": 651567,
+          "covered": 651567,
+          "overflow": 0,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 1.0,
+          "overflow_ratio": 0.0,
+          "common": {
+            "pixels": 651567,
+            "epe_sum": 2024515.219896078,
+            "d1_hits": 143327,
+            "epe": 3.107148182606053,
+            "d1": 0.21997277332952714
+          },
+          "near_common": {
+            "pixels": 289945,
+            "epe_sum": 1483469.6817855835,
+            "d1_hits": 106891,
+            "epe": 5.116383044320763,
+            "d1": 0.36865957336736277
+          }
+        },
+        "fixed_56": {
+          "foreground": 651567,
+          "covered": 651567,
+          "overflow": 2641,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 1.0,
+          "overflow_ratio": 0.0040533053392820696,
+          "common": {
+            "pixels": 651567,
+            "epe_sum": 1882027.0406198502,
+            "d1_hits": 144139,
+            "epe": 2.8884627990979443,
+            "d1": 0.22121899973448625
+          },
+          "near_common": {
+            "pixels": 289945,
+            "epe_sum": 1354424.8592567444,
+            "d1_hits": 113070,
+            "epe": 4.671316488495212,
+            "d1": 0.38997051164876095
+          }
+        }
+      },
+      "pred": {
+        "native_pad": {
+          "foreground": 614131,
+          "covered": 609521,
+          "overflow": 0,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 0.9924934582361092,
+          "overflow_ratio": 0.0,
+          "common": {
+            "pixels": 609521,
+            "epe_sum": 1719646.1184194088,
+            "d1_hits": 130215,
+            "epe": 2.8213074174957202,
+            "d1": 0.21363496909868568
+          },
+          "near_common": {
+            "pixels": 279099,
+            "epe_sum": 1286261.6723899841,
+            "d1_hits": 103429,
+            "epe": 4.608621572954343,
+            "d1": 0.37058176489346073
+          }
+        },
+        "fixed_56": {
+          "foreground": 614131,
+          "covered": 609521,
+          "overflow": 286,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 0.9924934582361092,
+          "overflow_ratio": 0.000469220912815145,
+          "common": {
+            "pixels": 609521,
+            "epe_sum": 1553308.841424942,
+            "d1_hits": 121196,
+            "epe": 2.5484090645358273,
+            "d1": 0.1988381040193857
+          },
+          "near_common": {
+            "pixels": 279099,
+            "epe_sum": 1188168.8866586685,
+            "d1_hits": 104793,
+            "epe": 4.257159239763197,
+            "d1": 0.3754689196306687
+          }
+        }
+      },
+      "four_way": {
+        "native_pad": {
+          "gt": {
+            "pixels": 609521,
+            "epe_sum": 1734583.1196053028,
+            "d1_hits": 129068,
+            "epe": 2.8458135480242728,
+            "d1": 0.21175316354973825
+          },
+          "pred": {
+            "pixels": 609521,
+            "epe_sum": 1719646.1184194088,
+            "d1_hits": 130215,
+            "epe": 2.8213074174957202,
+            "d1": 0.21363496909868568
+          },
+          "pred_minus_gt_epe": -0.02450613052855255
+        },
+        "fixed_56": {
+          "gt": {
+            "pixels": 609521,
+            "epe_sum": 1595964.9715538025,
+            "d1_hits": 129517,
+            "epe": 2.618392100606546,
+            "d1": 0.21248980757020677
+          },
+          "pred": {
+            "pixels": 609521,
+            "epe_sum": 1553308.841424942,
+            "d1_hits": 121196,
+            "epe": 2.5484090645358273,
+            "d1": 0.1988381040193857
+          },
+          "pred_minus_gt_epe": -0.06998303607071854
+        },
+        "interaction_epe": -0.04547690554216599
+      }
+    },
+    {
+      "seed": 2,
+      "bins": {
+        "native_pad": 63,
+        "fixed_56": 33
+      },
+      "targets": 287,
+      "matches": 157,
+      "near_targets": 23,
+      "near_matches": 19,
+      "unknown_distance_cars": 0,
+      "gt": {
+        "native_pad": {
+          "foreground": 651567,
+          "covered": 651567,
+          "overflow": 0,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 1.0,
+          "overflow_ratio": 0.0,
+          "common": {
+            "pixels": 651567,
+            "epe_sum": 1933948.936899662,
+            "d1_hits": 145648,
+            "epe": 2.9681505307967746,
+            "d1": 0.22353495496242137
+          },
+          "near_common": {
+            "pixels": 289945,
+            "epe_sum": 1389551.6039562225,
+            "d1_hits": 107734,
+            "epe": 4.7924661710194085,
+            "d1": 0.3715670213316319
+          }
+        },
+        "fixed_56": {
+          "foreground": 651567,
+          "covered": 651567,
+          "overflow": 2641,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 1.0,
+          "overflow_ratio": 0.0040533053392820696,
+          "common": {
+            "pixels": 651567,
+            "epe_sum": 1826173.9074001312,
+            "d1_hits": 132834,
+            "epe": 2.802741555972189,
+            "d1": 0.20386852004475364
+          },
+          "near_common": {
+            "pixels": 289945,
+            "epe_sum": 1256299.2320098877,
+            "d1_hits": 88791,
+            "epe": 4.332888071909802,
+            "d1": 0.30623394091982964
+          }
+        }
+      },
+      "pred": {
+        "native_pad": {
+          "foreground": 614131,
+          "covered": 609521,
+          "overflow": 0,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 0.9924934582361092,
+          "overflow_ratio": 0.0,
+          "common": {
+            "pixels": 609521,
+            "epe_sum": 1741716.6994097233,
+            "d1_hits": 146127,
+            "epe": 2.8575171313371044,
+            "d1": 0.23974071442985556
+          },
+          "near_common": {
+            "pixels": 279099,
+            "epe_sum": 1279230.008737564,
+            "d1_hits": 115014,
+            "epe": 4.583427417287644,
+            "d1": 0.4120903335375619
+          }
+        },
+        "fixed_56": {
+          "foreground": 614131,
+          "covered": 609521,
+          "overflow": 286,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 0.9924934582361092,
+          "overflow_ratio": 0.000469220912815145,
+          "common": {
+            "pixels": 609521,
+            "epe_sum": 1627063.6960492134,
+            "d1_hits": 129158,
+            "epe": 2.669413680659425,
+            "d1": 0.2119008204803444
+          },
+          "near_common": {
+            "pixels": 279099,
+            "epe_sum": 1191932.2813606262,
+            "d1_hits": 102402,
+            "epe": 4.270643324987285,
+            "d1": 0.3669020670084809
+          }
+        }
+      },
+      "four_way": {
+        "native_pad": {
+          "gt": {
+            "pixels": 609521,
+            "epe_sum": 1654460.355118513,
+            "d1_hits": 131294,
+            "epe": 2.7143615316264955,
+            "d1": 0.21540521163339738
+          },
+          "pred": {
+            "pixels": 609521,
+            "epe_sum": 1741716.6994097233,
+            "d1_hits": 146127,
+            "epe": 2.8575171313371044,
+            "d1": 0.23974071442985556
+          },
+          "pred_minus_gt_epe": 0.14315559971060887
+        },
+        "fixed_56": {
+          "gt": {
+            "pixels": 609521,
+            "epe_sum": 1555750.600801468,
+            "d1_hits": 119283,
+            "epe": 2.5524150944782344,
+            "d1": 0.19569957392772358
+          },
+          "pred": {
+            "pixels": 609521,
+            "epe_sum": 1627063.6960492134,
+            "d1_hits": 129158,
+            "epe": 2.669413680659425,
+            "d1": 0.2119008204803444
+          },
+          "pred_minus_gt_epe": 0.11699858618119041
+        },
+        "interaction_epe": -0.02615701352941846
+      }
+    },
+    {
+      "seed": 5,
+      "bins": {
+        "native_pad": 63,
+        "fixed_56": 33
+      },
+      "targets": 287,
+      "matches": 157,
+      "near_targets": 23,
+      "near_matches": 19,
+      "unknown_distance_cars": 0,
+      "gt": {
+        "native_pad": {
+          "foreground": 651567,
+          "covered": 651567,
+          "overflow": 0,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 1.0,
+          "overflow_ratio": 0.0,
+          "common": {
+            "pixels": 651567,
+            "epe_sum": 2019155.7999219894,
+            "d1_hits": 142447,
+            "epe": 3.098922750725542,
+            "d1": 0.21862218313696058
+          },
+          "near_common": {
+            "pixels": 289945,
+            "epe_sum": 1466947.7612781525,
+            "d1_hits": 104215,
+            "epe": 5.059400097529368,
+            "d1": 0.3594302367690424
+          }
+        },
+        "fixed_56": {
+          "foreground": 651567,
+          "covered": 651567,
+          "overflow": 2641,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 1.0,
+          "overflow_ratio": 0.0040533053392820696,
+          "common": {
+            "pixels": 651567,
+            "epe_sum": 1994280.9527366161,
+            "d1_hits": 153431,
+            "epe": 3.060745790895819,
+            "d1": 0.2354800043587229
+          },
+          "near_common": {
+            "pixels": 289945,
+            "epe_sum": 1449874.4263477325,
+            "d1_hits": 112765,
+            "epe": 5.000515361008924,
+            "d1": 0.3889185880080705
+          }
+        }
+      },
+      "pred": {
+        "native_pad": {
+          "foreground": 614131,
+          "covered": 609521,
+          "overflow": 0,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 0.9924934582361092,
+          "overflow_ratio": 0.0,
+          "common": {
+            "pixels": 609521,
+            "epe_sum": 1773929.8782036304,
+            "d1_hits": 137419,
+            "epe": 2.9103671214012814,
+            "d1": 0.225454086077428
+          },
+          "near_common": {
+            "pixels": 279099,
+            "epe_sum": 1318840.8118562698,
+            "d1_hits": 109070,
+            "epe": 4.725351261940279,
+            "d1": 0.3907932310757115
+          }
+        },
+        "fixed_56": {
+          "foreground": 614131,
+          "covered": 609521,
+          "overflow": 286,
+          "empty_coverage_instances": 0,
+          "empty_common_instances": 0,
+          "coverage": 0.9924934582361092,
+          "overflow_ratio": 0.000469220912815145,
+          "common": {
+            "pixels": 609521,
+            "epe_sum": 1641584.0217478275,
+            "d1_hits": 134838,
+            "epe": 2.693236199815638,
+            "d1": 0.22121961343415567
+          },
+          "near_common": {
+            "pixels": 279099,
+            "epe_sum": 1217289.693203926,
+            "d1_hits": 105979,
+            "epe": 4.361497867079159,
+            "d1": 0.379718307840587
+          }
+        }
+      },
+      "four_way": {
+        "native_pad": {
+          "gt": {
+            "pixels": 609521,
+            "epe_sum": 1726300.5507922173,
+            "d1_hits": 128489,
+            "epe": 2.832224895930111,
+            "d1": 0.21080323729617192
+          },
+          "pred": {
+            "pixels": 609521,
+            "epe_sum": 1773929.8782036304,
+            "d1_hits": 137419,
+            "epe": 2.9103671214012814,
+            "d1": 0.225454086077428
+          },
+          "pred_minus_gt_epe": 0.07814222547117033
+        },
+        "fixed_56": {
+          "gt": {
+            "pixels": 609521,
+            "epe_sum": 1708468.3947911263,
+            "d1_hits": 138235,
+            "epe": 2.8029688801388732,
+            "d1": 0.22679284224825724
+          },
+          "pred": {
+            "pixels": 609521,
+            "epe_sum": 1641584.0217478275,
+            "d1_hits": 134838,
+            "epe": 2.693236199815638,
+            "d1": 0.22121961343415567
+          },
+          "pred_minus_gt_epe": -0.10973268032323524
+        },
+        "interaction_epe": -0.18787490579440558
+      }
+    }
+  ],
+  "paired_bootstrap": {
+    "gt": {
+      "relative_epe_increase": {
+        "point": -0.04602802753492663,
+        "one_sided_95_upper": 0.01947216182980969,
+        "valid_draws": 10000
+      },
+      "absolute_d1_increase": {
+        "point": -0.0005207957636488014,
+        "one_sided_95_upper": 0.024338198467571553,
+        "valid_draws": 10000
+      },
+      "paired_by_seed": [
+        {
+          "seed": 17,
+          "native_epe": 3.107148182606053,
+          "fixed_epe": 2.8884627990979443,
+          "delta_epe": -0.21868538350810862,
+          "delta_d1": 0.001246226404959111
+        },
+        {
+          "seed": 2,
+          "native_epe": 2.9681505307967746,
+          "fixed_epe": 2.802741555972189,
+          "delta_epe": -0.16540897482458572,
+          "delta_d1": -0.01966643491766773
+        },
+        {
+          "seed": 5,
+          "native_epe": 3.098922750725542,
+          "fixed_epe": 3.060745790895819,
+          "delta_epe": -0.038176959829723245,
+          "delta_d1": 0.016857821221762326
+        }
+      ]
+    },
+    "pred": {
+      "relative_epe_increase": {
+        "point": -0.07895186779604524,
+        "one_sided_95_upper": -0.008289925572017912,
+        "valid_draws": 10000
+      },
+      "absolute_d1_increase": {
+        "point": -0.015623743890694486,
+        "one_sided_95_upper": 0.0072014136491126025,
+        "valid_draws": 10000
+      },
+      "paired_by_seed": [
+        {
+          "seed": 17,
+          "native_epe": 2.8213074174957202,
+          "fixed_epe": 2.5484090645358273,
+          "delta_epe": -0.27289835295989295,
+          "delta_d1": -0.014796865079299976
+        },
+        {
+          "seed": 2,
+          "native_epe": 2.8575171313371044,
+          "fixed_epe": 2.669413680659425,
+          "delta_epe": -0.18810345067767953,
+          "delta_d1": -0.02783989394951117
+        },
+        {
+          "seed": 5,
+          "native_epe": 2.9103671214012814,
+          "fixed_epe": 2.693236199815638,
+          "delta_epe": -0.2171309215856434,
+          "delta_d1": -0.004234472643272341
+        }
+      ]
+    }
+  },
+  "timing": {
+    "native_pad": {
+      "local_ms": {
+        "p50": 899.6607055664062,
+        "p95": 3430.978808593746
+      },
+      "e2e_ms": {
+        "p50": 981.7010443657637,
+        "p95": 3457.404286693776
+      },
+      "peak_mib": 2971.57470703125
+    },
+    "fixed_56": {
+      "local_ms": {
+        "p50": 67.6102409362793,
+        "p95": 189.52393417358388
+      },
+      "e2e_ms": {
+        "p50": 147.12150255218148,
+        "p95": 250.03943531773982
+      },
+      "peak_mib": 1318.556640625
+    }
+  },
+  "precision_pass": true,
+  "timing_pass": true,
+  "deploy_fixed": true,
+  "metadata": {
+    "evaluation_cache_sha256": "5fb66744d0710c1ba807d09a1e02b1faff455a37b35aa1286fb2d9a014fdbb2e",
+    "device": "NVIDIA RTX 6000 Ada Generation",
+    "dtype": "float32",
+    "mask_included_in_timing": true,
+    "timing_repeats": 5,
+    "timing_seed": 17,
+    "warmup_per_frame_per_arm": 2,
+    "torch_version": "2.1.2"
+  }
+}
