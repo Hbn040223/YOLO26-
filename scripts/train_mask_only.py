@@ -19,7 +19,7 @@ from lightbackbone_stereo_yolo.data.frame_dataset import KittiFrameDataset, buil
 from lightbackbone_stereo_yolo.detection import decode_anchorfree_predictions
 from lightbackbone_stereo_yolo.geometry import generate_point_locations, point_levels
 from lightbackbone_stereo_yolo.idisp_ab import project_disparity
-from lightbackbone_stereo_yolo.mask import mask_loss
+from lightbackbone_stereo_yolo.mask import ContextInstanceMaskHead, mask_loss
 from lightbackbone_stereo_yolo.training import freeze_for_mask_only, prepare_mask_rois
 from lightbackbone_stereo_yolo.training_control import append_jsonl_record
 from lightbackbone_stereo_yolo.training_metrics import (
@@ -284,18 +284,40 @@ def save(path, model, bundle, optimizer, epoch, step, metric):
     os.replace(temporary, path)
 
 
-def update_mask(model, entry, optimizer, device):
+def update_mask(model, entry, optimizer, device, pos_weight=None):
     model.instance_head.mask.train()
     optimizer.zero_grad(set_to_none=True)
     logits = model.instance_head.mask(entry["features"].to(device))
     target, valid = (entry[key].to(device) for key in ("target", "valid"))
-    loss = mask_loss(logits, target.float(), valid)
+    loss = mask_loss(logits, target.float(), valid, pos_weight=pos_weight)
     loss.backward()
     norm = torch.nn.utils.clip_grad_norm_(model.instance_head.mask.parameters(), 10., error_if_nonfinite=True)
     if not torch.isfinite(loss):
         raise RuntimeError("non-finite Mask loss")
     optimizer.step()
     return float(loss.detach()), float(norm)
+
+
+
+def foreground_weight(entries, device):
+    positive = sum(int((row["target"] & row["valid"]).sum()) for row in entries)
+    valid = sum(int(row["valid"].sum()) for row in entries)
+    if not 0 < positive < valid:
+        raise RuntimeError("weighted Mask supervision requires both foreground and background")
+    return torch.tensor((valid - positive) / positive, device=device)
+
+
+def initialize_context(model, bundle, device):
+    channels = bundle["config"]["adapter_channels"]
+    # Reproduce the probe initialization after removing its four inert zero channels.
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(17)
+        reference = ContextInstanceMaskHead(channels + 4).state_dict()
+    reference["detail.0.weight"] = reference["detail.0.weight"][:, :channels].contiguous()
+    head = ContextInstanceMaskHead(channels)
+    head.load_state_dict(reference, strict=True)
+    model.instance_head.mask = head.to(device)
+    bundle["config"] = {**bundle["config"], "mask_head_variant": "context"}
 
 
 def overfit_gate(metrics):
@@ -309,6 +331,7 @@ def parse_args():
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--weights", type=Path, default=ROOT / "models/stereo-yolo26-fixed56-seed17-e20.pt")
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--mask-head", choices=("light", "context"), default="light")
     parser.add_argument("--stage", choices=("baseline", "overfit", "formal", "all"), default="all")
     return parser.parse_args()
 
@@ -320,7 +343,9 @@ def run_formal(args, model, bundle, split, frozen, heldout, car_class):
     train = build_features(model, dataset_for(split["mask_train_144"], bundle), args.device, car_class)["gt"]
     if not train or not dev["pred"] or not any((row["target"] & row["valid"]).any() for row in train):
         raise RuntimeError("missing valid Car training or Pred-RoI development samples")
-    optimizer = torch.optim.AdamW(model.instance_head.mask.parameters(), lr=3e-4)
+    context = args.mask_head == "context"
+    pos_weight = foreground_weight(train, args.device) if context else None
+    optimizer = torch.optim.AdamW(model.instance_head.mask.parameters(), lr=1e-3 if context else 3e-4)
     best, last_significant, patience, steps = None, None, 0, 0
     rng = random.Random(17)
     for epoch in range(1, 31):
@@ -328,7 +353,7 @@ def run_formal(args, model, bundle, split, frozen, heldout, car_class):
         rng.shuffle(order)
         losses = []
         for index in order:
-            loss, _ = update_mask(model, train[index], optimizer, args.device)
+            loss, _ = update_mask(model, train[index], optimizer, args.device, pos_weight)
             losses.append(loss)
             steps += 1
         gt = evaluate_mask(model, dev["gt"], args.device, car_class)["crop_grid"]["car"]
@@ -414,19 +439,23 @@ def main():
                                          for name, s in baseline.items()}), flush=True)
     if args.stage == "baseline":
         return
+    context = args.mask_head == "context"
+    if context:
+        initialize_context(model, bundle, args.device)
     if args.stage == "formal":
         report = json.loads((out / "overfit_gate.json").read_text())
-        if not report["passed"]:
+        if not report["passed"] or report.get("mask_head", "light") != args.mask_head:
             raise RuntimeError("eight-frame prerequisite failed")
     else:
         entries = build_features(model, dataset_for(split["overfit_8"], bundle), args.device, car_class)["gt"]
         if len(entries) != 8 or not all((row["target"] & row["valid"]).any() for row in entries):
             raise RuntimeError("eight-frame manifest must supply eight nonempty Mask training batches")
         initial_mask = {key: tensor.clone() for key, tensor in model.instance_head.mask.state_dict().items()}
-        optimizer = torch.optim.AdamW(model.instance_head.mask.parameters(), lr=3e-4)
+        pos_weight = foreground_weight(entries, args.device) if context else None
+        optimizer = torch.optim.AdamW(model.instance_head.mask.parameters(), lr=1e-3 if context else 3e-4)
         for step in range(401):
             if step:
-                loss, grad_norm = update_mask(model, entries[(step-1) % len(entries)], optimizer, args.device)
+                loss, grad_norm = update_mask(model, entries[(step-1) % len(entries)], optimizer, args.device, pos_weight)
                 if step == 1:
                     if grad_norm <= 0:
                         raise RuntimeError("first Mask step received zero gradient")
@@ -438,11 +467,14 @@ def main():
             progress = {"step": step, **mask}
             append_jsonl_record(out / "overfit_metrics.jsonl", progress)
             print("overfit: " + json.dumps(progress), flush=True)
+            if context and overfit_gate(mask):
+                break
         verify_frozen(model, frozen)
         passed = overfit_gate(mask)
-        report = {"passed": passed, "final": progress, "frames": [row["frame"] for row in entries]}
+        report = {"passed": passed, "mask_head": args.mask_head, "final": progress,
+                  "frames": [row["frame"] for row in entries]}
         write_json(out / "overfit_gate.json", report)
-        save(out / "overfit_last.pt", model, bundle, optimizer, 0, 400, report)
+        save(out / "overfit_last.pt", model, bundle, optimizer, 0, step, report)
         print(f"eight-frame gate: {passed}", flush=True)
         if not passed or args.stage == "overfit":
             return

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor, nn
 from .local_disparity import RegularizedIDispHead, RoiDisparity
-from .mask import LightInstanceMaskHead, foreground_disparity_validity
+from .mask import ContextInstanceMaskHead, LightInstanceMaskHead, foreground_disparity_validity
 from .roi import ROI_SAMPLING_MODES, CropMetadata, LeftRoIAlign, StereoRoIAlign, align_mask_spatial_valid, make_pair_crop_windows, sample_roi_feature
 from .local_aggregation import AttentionPyramid
 from .geometry import generate_point_locations, point_levels
@@ -24,7 +24,8 @@ class InstanceDisparityOutput:
 
 class StereoLocalInstanceHead(nn.Module):
     def __init__(
-        self, channels: int, dmax_roi: int, hidden_channels: int = 32, *, roi_sampling: str = "native_pad"
+        self, channels: int, dmax_roi: int, hidden_channels: int = 32, *,
+        roi_sampling: str = "native_pad", mask_head_variant: str = "light"
     ) -> None:
         super().__init__()
         if roi_sampling not in ROI_SAMPLING_MODES:
@@ -33,7 +34,12 @@ class StereoLocalInstanceHead(nn.Module):
         self.roi = StereoRoIAlign(stride=4)
         self.p3_roi = LeftRoIAlign(stride=8)
         self.p4_roi = LeftRoIAlign(stride=16)
-        self.mask = LightInstanceMaskHead(channels)
+        if mask_head_variant == "light":
+            self.mask = LightInstanceMaskHead(channels)
+        elif mask_head_variant == "context" and roi_sampling == "fixed_56":
+            self.mask = ContextInstanceMaskHead(channels)
+        else:
+            raise ValueError(f"unsupported Mask head {mask_head_variant!r} for {roi_sampling!r}")
         self.idisp = RegularizedIDispHead(channels, dmax_roi, hidden_channels)
 
     def _disparity_forward(

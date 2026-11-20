@@ -65,3 +65,15 @@ class MaskOnlyTest(unittest.TestCase):
         self.assertAlmostEqual(results["iou"], 1 / 3)
         self.assertEqual(results["precision"], .5)
         self.assertEqual(results["recall"], .5)
+
+
+class ContextMaskContract(unittest.TestCase):
+    def test_fixed_grid_context_head_runs_on_shared_left_roi(self):
+        from lightbackbone_stereo_yolo.mask import ContextInstanceMaskHead
+        head = StereoLocalInstanceHead(4, 1, roi_sampling="fixed_56", mask_head_variant="context")
+        self.assertIsInstance(head.mask, ContextInstanceMaskHead)
+        features = torch.rand(2, 4, 56, 56)
+        result = head.mask(features)
+        self.assertEqual(tuple(result.shape), (2, 1, 28, 28))
+        result.square().mean().backward()
+        self.assertTrue(all(p.grad is not None and torch.isfinite(p.grad).all() for p in head.mask.parameters()))
