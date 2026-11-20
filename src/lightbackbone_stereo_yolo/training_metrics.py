@@ -24,7 +24,27 @@ def _pairwise_iou(first: Tensor, second: Tensor) -> Tensor:
     return inter/(area_first[:,None]+area_second[None,:]-inter).clamp_min(1e-8)
 
 
-def greedy_match_paired_detections(predictions: Tensor, targets: Tensor, scores: Tensor, minimum_quality: float=.5) -> PairedMatch:
+def paired_match_eligibility(
+    predictions: Tensor, targets: Tensor, minimum_quality: float, *,
+    prediction_classes: Tensor | None = None, target_classes: Tensor | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Return min bilateral IoU and the same-GT eligibility mask."""
+    pl, pr = pair_boxes_to_lr(predictions)
+    tl, tr = pair_boxes_to_lr(targets)
+    quality = torch.minimum(_pairwise_iou(pl, tl), _pairwise_iou(pr, tr))
+    eligible = quality >= minimum_quality
+    if prediction_classes is not None or target_classes is not None:
+        if (prediction_classes is None or target_classes is None
+                or prediction_classes.shape != (len(predictions),) or target_classes.shape != (len(targets),)):
+            raise ValueError("both class tensors must align with their paired boxes")
+        eligible &= prediction_classes[:, None] == target_classes[None, :]
+    return quality, eligible
+
+
+def greedy_match_paired_detections(
+    predictions: Tensor, targets: Tensor, scores: Tensor, minimum_quality: float = .5, *,
+    prediction_classes: Tensor | None = None, target_classes: Tensor | None = None,
+) -> PairedMatch:
     """Greedy one-to-one match sorted by min(left IoU, right IoU), then score."""
     if predictions.ndim!=2 or predictions.shape[1]!=6 or targets.ndim!=2 or targets.shape[1]!=6:
         raise ValueError("paired boxes must have shape [N, 6]")
@@ -33,11 +53,12 @@ def greedy_match_paired_detections(predictions: Tensor, targets: Tensor, scores:
     if not predictions.numel() or not targets.numel():
         empty=torch.empty(0,dtype=torch.long,device=predictions.device)
         return PairedMatch(empty,empty, predictions.new_empty(0),0,targets.shape[0])
-    pl,pr=pair_boxes_to_lr(predictions)
-    tl,tr=pair_boxes_to_lr(targets)
-    quality=torch.minimum(_pairwise_iou(pl,tl),_pairwise_iou(pr,tr))
+    quality, eligible = paired_match_eligibility(
+        predictions, targets, minimum_quality,
+        prediction_classes=prediction_classes, target_classes=target_classes,
+    )
     candidates=[]
-    for prediction_index,target_index in (quality>=minimum_quality).nonzero().tolist():
+    for prediction_index,target_index in eligible.nonzero().tolist():
         candidates.append((float(quality[prediction_index,target_index]),float(scores[prediction_index]),prediction_index,target_index))
     candidates.sort(key=lambda item:(-item[0],-item[1],item[2],item[3]))
     used_predictions=set(); used_targets=set(); kept=[]
@@ -328,3 +349,34 @@ def evaluate_fixed_roi_pairs(pyramid: object, instance_head: object, left: Tenso
         gt_supervision.disparity_valid[:, 0], overlap & (pred_valid >= .5),
     )
     return metrics, gt_output, pred_output
+
+
+def mask_pixel_counts(prediction: Tensor, truth: Tensor, valid: Tensor) -> dict[str, Tensor]:
+    """Return per-instance counts on the requested grid with invalid pixels excluded."""
+    if prediction.shape != truth.shape or valid.shape != truth.shape or prediction.ndim < 2:
+        raise ValueError("prediction, truth and valid must share the Mask instance grid")
+    prediction = prediction.bool()
+    truth = truth.bool()
+    valid = valid.bool()
+    tp = (prediction & truth & valid).flatten(1).sum(1)
+    fp = (prediction & ~truth & valid).flatten(1).sum(1)
+    fn = (~prediction & truth & valid).flatten(1).sum(1)
+    return {"tp": tp, "fp": fp, "fn": fn, "valid_pixels": valid.flatten(1).sum(1)}
+
+
+def summarize_mask_counts(counts: dict[str, Tensor]) -> dict[str, float | int | None]:
+    """Macro IoU matches the E20 benchmark. Precision and recall pool valid pixels."""
+    tp, fp, fn, valid = (counts[key] for key in ("tp", "fp", "fn", "valid_pixels"))
+    union = tp + fp + fn
+    measured = union > 0
+    tp_total, fp_total, fn_total, valid_total = map(lambda values: int(values.sum()), (tp, fp, fn, valid))
+    pred_total, gt_total = tp_total + fp_total, tp_total + fn_total
+    return {
+        "instances": len(tp), "iou_instances": int(measured.sum()), "valid_pixels": valid_total,
+        "tp": tp_total, "fp": fp_total, "fn": fn_total,
+        "iou": float((tp[measured] / union[measured]).mean()) if measured.any() else None,
+        "precision": tp_total / pred_total if pred_total else (0. if gt_total else None),
+        "recall": tp_total / gt_total if gt_total else None,
+        "foreground_fraction": pred_total / valid_total if valid_total else None,
+        "empty_prediction": int(((tp + fp) == 0).sum()), "empty_gt": int(((tp + fn) == 0).sum()),
+    }

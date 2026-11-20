@@ -39,6 +39,9 @@ class InstanceHeadContractTest(unittest.TestCase):
         output = model(torch.randn(1, 3, 64, 64), torch.randn(1, 3, 64, 64))
         self.assertEqual(output.boxes_left.shape, (0, 4))
         self.assertEqual(output.disparity.shape, (0, 0, 0))
+        self.assertEqual(output.pair_ids.shape, (0,))
+        self.assertEqual(output.pair_ids.dtype, torch.long)
+        self.assertEqual(output.foreground_validity.shape, output.disparity.shape)
 
     def test_end_to_end_candidate_reaches_mask_and_disparity_outputs(self) -> None:
         self.assertIsNotNone(StereoYoloLocalModel)
@@ -54,6 +57,8 @@ class InstanceHeadContractTest(unittest.TestCase):
         self.assertEqual(output.mask_logits.shape, (1, 1, 28, 28))
         self.assertEqual(output.mask_validity.shape, (1, 1, 28, 28))
         self.assertEqual(output.disparity.shape[0], 1)
+        self.assertEqual(output.pair_ids.tolist(), [0])
+        self.assertFalse(output.foreground_validity.any())
 
     def test_instance_head_returns_left_mask_and_image_disparity_only(self) -> None:
         self.assertIsNotNone(StereoLocalInstanceHead)

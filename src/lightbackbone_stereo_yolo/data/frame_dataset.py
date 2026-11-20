@@ -38,10 +38,12 @@ class KittiFrameRecord:
     annotations: tuple[KittiManifestRecord, ...]
 
 
-def build_frame_records(root: str | Path, annotation_json: str | Path) -> list[KittiFrameRecord]:
+def build_frame_records(
+    root: str | Path, annotation_json: str | Path, *, require_files: bool = False,
+) -> list[KittiFrameRecord]:
     """Group the validated per-instance manifest by frame without re-reading assets."""
     grouped: dict[str, list[KittiManifestRecord]] = {}
-    for record in build_kitti_manifest(root, annotation_json):
+    for record in build_kitti_manifest(root, annotation_json, require_files=require_files):
         grouped.setdefault(record.frame_id, []).append(record)
     frames: list[KittiFrameRecord] = []
     for frame_id in sorted(grouped):

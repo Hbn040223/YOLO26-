@@ -1,1 +1,2 @@
 8e1caf6577dee2c92f64cf0bea62ec0e08b8d15832977b17830192f9fe1ffeb5  models/stereo-yolo26-fixed56-seed17-e20.pt
+72437491e3fded8099a7fdf26547518f55f6a6754880950a08d57f2bd8f41b1b  models/foreground_evaluation.pt

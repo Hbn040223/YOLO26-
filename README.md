@@ -21,6 +21,36 @@ python scripts/infer.py --openstereo-source OpenStereo \
 
 Use a rectified left/right pair with equal image dimensions. The released checkpoint already provides the backbone weights. Inference defaults to score 0.40 and pre-top-k 500 with the one-to-one detector. The NPZ contains aligned `boxes_left`, `boxes_right`, scores, classes, the per-pair absolute disparity in original-image pixels, the disparity validity mask, and the continuous crop geometry. Mask probabilities are in `mask_probability`. Given a disparity array index `(v,u)`, its left-image grid center is `(c_l + (u+0.5)*c/w_roi, y0 + (v+0.5)*h_crop/h_roi)`.
 
+Append `--paired-nms --paired-nms-iou .5` to try class-aware stereo suppression. With the flag omitted, the published one-to-one model still skips NMS. When enabled, a lower-scoring pair is removed only if its class matches and both view IoUs exceed the NMS threshold. The kept pair indices stay aligned through RoI, mask, and disparity. Ties in anchor-free top-k and NMS prefer the original dense candidate order.
+
+### Paired NMS on/off evaluation
+
+Use the same checkpoint and KITTI validation split in both arms. The evaluator captures a dense candidate archive before score filtering/top-k, then replays NMS off and each IoU on the same pre-NMS pool at every score threshold:
+
+```bash
+python scripts/evaluate_paired_nms.py --openstereo-source OpenStereo \
+  --dataset-root /path/to/KITTI --split-json /path/to/validation.json \
+  --device cuda:0 --scores .05,.10,.15,.25,.30,.35,.40 \
+  --nms-ious .5,.6,.7 --topk 500 \
+  --save-candidates paired_candidates.json --output paired_nms_eval.json
+
+python scripts/evaluate_paired_nms.py --candidates paired_candidates.json \
+  --scores .25,.40 --nms-ious .5,.6,.7 --output paired_nms_replay.json
+```
+
+The report records checkpoint and split hashes, score distributions, pair counts, duplicates, kept dense IDs, one-to-one coverage/precision, and paired frame bootstrap intervals for on-minus-off differences. Matching is quality-first with both views required to hit the same GT. Use `--class-agnostic-matching` to compare with historical matcher semantics while keeping suppression class-aware. The NMS IoU and GT matching IoU are separate settings. Both evaluation and timing fail on missing assets referenced by the split's annotations so the cohort cannot silently shrink.
+
+Choose an operating point on validation data subject to an agreed coverage loss, then confirm it on held-out data and measure full model latency. Keep the score, top-K, checkpoint and split consistent between the offline comparison and the benchmark. For example:
+
+```bash
+python scripts/benchmark_paired_nms.py --openstereo-source OpenStereo \
+  --dataset-root /path/to/KITTI --split-json /path/to/validation.json \
+  --device cuda:0 --score .40 --topk 500 --nms-iou .5 \
+  --warmup 2 --repeats 3 --output paired_nms_timing.json
+```
+
+Timing runs both arms on each stereo input in alternating order, using batch-one forwards and CUDA synchronization. P50/P95 end-to-end latency excludes input loading, transfer, and output export. Stage timings include decode and RoI dispatch (including optional NMS) and the instance head (RoI, Mask, and iDisp). Empty outputs skip the instance head. Positive on-minus-off latency means the NMS arm took longer. Pair counts show RoI workload; Mask/iDisp accuracy requires separate evaluation.
+
 ## Evaluation
 
 The 40-frame KITTI validation experiment uses the same frozen B2a pairs for both local disparity configurations. Prediction-driven EPE and D1 are measured on common GT foreground pixels. Accuracy below averages seeds 17, 2 and 5 at epoch 20. Timing includes all 2,323 retained pairs and the Mask branch, measured on an RTX 6000 Ada using seed 17.
@@ -33,3 +63,46 @@ The 40-frame KITTI validation experiment uses the same frozen B2a pairs for both
 | Peak allocated GPU memory | 2,972 MiB | 1,319 MiB |
 
 See [the full evaluation report](evaluation/summary.json). Training and evaluation entry points remain in `scripts/`. KITTI data is obtained separately.
+
+[Real KITTI E20 paired-NMS validation](docs/paired_nms_e20_validation.md).
+
+## Car foreground disparity
+
+Train the Mask head with the published fixed-grid model and the frozen candidate archive from the paired NMS evaluation:
+
+```bash
+PYTHONPATH=src python scripts/train_mask_only.py \
+  --dataset-root /path/to/KITTI --train-json /path/to/train.json --val-json /path/to/val.json \
+  --openstereo-source OpenStereo --candidate-archive e20_candidates.json --replay e20_replay.json \
+  --output-dir outputs/mask_only --device cpu
+```
+
+The entry point pins the 144/16 development split and the eight training frames. It recomputes the E20 Mask on archived pairs and starts the full training run after the eight-frame gate passes. See `baseline.json`, `overfit_gate.json`, and `formal_gate.json` for results. The crop-grid Mask IoU is a per-instance mean. Precision and recall pool valid pixels. The original-image Mask metrics use the existing left crop transform.
+
+A checkpoint that passes the formal Car gate is exported as `foreground_ready.pt`. Given that checkpoint, `infer.py` returns `foreground_disparity` and `foreground_validity` on the fixed disparity grid. The row's `pair_ids` field holds the frame-local detector candidate ID. Background and unsupported categories have invalid foreground disparity values. Existing E20 bundles have no validated foreground classes. The original `disparity` array still provides the rectangular result for diagnostics.
+
+The optional `--mask-head context` trains a compact encoder-decoder on the same left RoI, preserving the `28×28` Mask output. It starts that Mask head fresh and uses class-weighted BCE. The rest of the published E20 network stays frozen. The training stage rechecks the eight-frame gate for the selected head before formal fitting.
+
+## Experimental foreground evaluation checkpoint
+
+`models/foreground_evaluation.pt` is the exact Car-only checkpoint used for the 40-frame foreground evaluation. It uses the epoch-25 context Mask from the per-instance BCE+Dice run with its development-selected Mask threshold 0.40 folded into the final logit bias. The detector, shared encoder and local iDisp weights come from E20. The inference entry point defaults to the original E20 checkpoint.
+
+**Development gate override.** The checkpoint was evaluated after explicitly bypassing the development-set GT-RoI Mask IoU requirement of **75%**. It measured **73.83%** GT-RoI Mask IoU and **76.77%** Pred-RoI Mask IoU on the 16-frame development split.
+
+The original KITTI 40-frame acceptance criteria were evaluated as specified, using the 28×28 crop grid.
+
+| Cohort | Mask IoU | Foreground precision | Foreground recall |
+| --- | ---: | ---: | ---: |
+| GT-RoI, 257 cars | 69.42% | 82.86% | 89.83% |
+| Fixed Pred-RoI, 149 cars | 75.47% | 86.29% | 89.81% |
+
+The fixed Pred-RoI metrics passed. The GT-RoI result was below the 75% acceptance threshold. This artifact is designated for evaluation. With score 0.40, top-K 500 and class-aware paired NMS at IoU 0.70, the 149 matched cars had 92.65% valid GT foreground coverage and 10.49% background among exported foreground pixels. On the retained GT foreground pixels, EPE was 2.25 px and D1 was 19.02%.
+
+Verify the artifact with `sha256sum -c models/SHA256SUMS`. Use it explicitly for inference:
+
+```bash
+PYTHONPATH=src python scripts/infer.py \
+  --weights models/foreground_evaluation.pt --openstereo-source OpenStereo \
+  --left /path/to/left.png --right /path/to/right.png \
+  --score .40 --paired-nms --paired-nms-iou .70 --output foreground_eval.npz
+```
