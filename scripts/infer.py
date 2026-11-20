@@ -29,6 +29,8 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
         encoder, detector, instance, score_threshold=score, pre_nms_topk=topk,
         detector_variant=config["detector_variant"], right_offset_mode=config["right_offset_mode"],
         apply_paired_nms=apply_paired_nms, paired_nms_iou=paired_nms_iou,
+        foreground_class_indices=tuple(bundle["class_mapping"][key]
+                                       for key in bundle.get("foreground_mask_raw_classes", ())),
     )
     model.load_state_dict(bundle["model"], strict=True)
     return model.to(device).eval(), bundle
@@ -66,8 +68,13 @@ def main() -> None:
             result = model(left, right)
             arrays = {name: getattr(result, name).cpu().numpy() for name in (
                 "boxes_left", "boxes_right", "scores", "classes", "disparity", "validity", "mask_validity",
+                "pair_ids", "foreground_validity",
             )}
             arrays["mask_probability"] = result.mask_logits.sigmoid().cpu().numpy()
+            arrays["foreground_disparity"] = result.disparity.masked_fill(
+                ~result.foreground_validity, torch.nan).cpu().numpy()
+            arrays["foreground_supported_raw_classes"] = np.asarray(
+                bundle.get("foreground_mask_raw_classes", ()), dtype=np.int64)
     finally:
         hook.remove()
     for name in ("c_l", "c_r", "c", "y0", "h_crop", "w_roi", "h_roi"):

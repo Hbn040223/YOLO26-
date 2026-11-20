@@ -245,6 +245,38 @@ def load_idisp_frozen_state(model: StereoYoloTrainingModel, state: dict[str, Ten
     return sorted(name for name in state if name.startswith("instance_head.idisp."))
 
 
+def freeze_for_mask_only(model: StereoYoloTrainingModel) -> None:
+    for module in (model.encoder, model.detector, model.instance_head.idisp):
+        module.requires_grad_(False).eval()
+    model.instance_head.mask.requires_grad_(True)
+
+
+def prepare_mask_rois(instance_head: nn.Module, p2_left: Tensor, boxes6: Tensor,
+                      masks: Tensor, image_hw: tuple[int, int], margin: float = 16.) -> dict:
+    """Prepare frozen features and supervision on the same shared crop."""
+    left_roi, valid, crop = instance_head.sample_mask_roi(p2_left, boxes6, *image_hw, margin=margin)
+    target = align_left_mask_target(masks, boxes6, crop)
+    return {"features": left_roi, "target": target, "valid": valid, "crop": crop}
+
+
+def training_forward_mask_only(model: StereoYoloTrainingModel, left: Tensor, right: Tensor, target: dict,
+                               car_class: int, margin: float = 16.) -> dict | None:
+    """Run the encoder and left Mask only for annotated Car instances."""
+    if left.shape[0] != 1 or left.shape != right.shape:
+        raise ValueError("Mask-only accepts one stereo frame")
+    cars = (target["classes"] == car_class).nonzero().flatten()
+    if not cars.numel():
+        return None
+    with torch.no_grad():
+        pyramid = model.encoder(left, right)
+        rois = prepare_mask_rois(model.instance_head, pyramid.p2_left,
+                                target["boxes6"][cars].to(left.device), target["masks"][cars].to(left.device),
+                                left.shape[-2:], margin)
+    logits = model.instance_head.mask(rois["features"])
+    loss = mask_loss(logits, rois["target"].float(), rois["valid"])
+    return {**rois, "logits": logits, "loss": loss}
+
+
 def freeze_for_idisp_only(model: StereoYoloTrainingModel) -> None:
     for module in (model.encoder, model.detector, model.instance_head.mask):
         module.requires_grad_(False).eval()

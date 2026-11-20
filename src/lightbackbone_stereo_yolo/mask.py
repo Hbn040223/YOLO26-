@@ -22,3 +22,16 @@ def mask_loss(mask_logits: Tensor, target_mask: Tensor, valid: Tensor) -> Tensor
     per_pixel = F.binary_cross_entropy_with_logits(mask_logits, target_mask, reduction="none")
     weighted = per_pixel * valid.to(per_pixel.dtype)
     return weighted.sum() / valid.sum().clamp_min(1)
+
+
+
+def foreground_disparity_validity(
+    mask_logits: Tensor, mask_validity: Tensor, disparity: Tensor,
+    disparity_validity: Tensor, supported: Tensor,
+) -> Tensor:
+    """Return instance foreground validity on the deployed disparity grid."""
+    probabilities = F.interpolate(mask_logits.sigmoid(), size=disparity.shape[-2:],
+                                  mode="bilinear", align_corners=False)[:, 0]
+    spatial = F.interpolate(mask_validity.float(), size=disparity.shape[-2:], mode="nearest")[:, 0].bool()
+    return (supported[:, None, None] & (probabilities > .50)
+            & spatial & disparity_validity & torch.isfinite(disparity))

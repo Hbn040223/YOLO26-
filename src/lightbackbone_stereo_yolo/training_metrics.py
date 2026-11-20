@@ -349,3 +349,34 @@ def evaluate_fixed_roi_pairs(pyramid: object, instance_head: object, left: Tenso
         gt_supervision.disparity_valid[:, 0], overlap & (pred_valid >= .5),
     )
     return metrics, gt_output, pred_output
+
+
+def mask_pixel_counts(prediction: Tensor, truth: Tensor, valid: Tensor) -> dict[str, Tensor]:
+    """Return per-instance counts on the requested grid with invalid pixels excluded."""
+    if prediction.shape != truth.shape or valid.shape != truth.shape or prediction.ndim < 2:
+        raise ValueError("prediction, truth and valid must share the Mask instance grid")
+    prediction = prediction.bool()
+    truth = truth.bool()
+    valid = valid.bool()
+    tp = (prediction & truth & valid).flatten(1).sum(1)
+    fp = (prediction & ~truth & valid).flatten(1).sum(1)
+    fn = (~prediction & truth & valid).flatten(1).sum(1)
+    return {"tp": tp, "fp": fp, "fn": fn, "valid_pixels": valid.flatten(1).sum(1)}
+
+
+def summarize_mask_counts(counts: dict[str, Tensor]) -> dict[str, float | int | None]:
+    """Macro IoU matches the E20 benchmark. Precision and recall pool valid pixels."""
+    tp, fp, fn, valid = (counts[key] for key in ("tp", "fp", "fn", "valid_pixels"))
+    union = tp + fp + fn
+    measured = union > 0
+    tp_total, fp_total, fn_total, valid_total = map(lambda values: int(values.sum()), (tp, fp, fn, valid))
+    pred_total, gt_total = tp_total + fp_total, tp_total + fn_total
+    return {
+        "instances": len(tp), "iou_instances": int(measured.sum()), "valid_pixels": valid_total,
+        "tp": tp_total, "fp": fp_total, "fn": fn_total,
+        "iou": float((tp[measured] / union[measured]).mean()) if measured.any() else None,
+        "precision": tp_total / pred_total if pred_total else (0. if gt_total else None),
+        "recall": tp_total / gt_total if gt_total else None,
+        "foreground_fraction": pred_total / valid_total if valid_total else None,
+        "empty_prediction": int(((tp + fp) == 0).sum()), "empty_gt": int(((tp + fn) == 0).sum()),
+    }

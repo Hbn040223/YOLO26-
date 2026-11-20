@@ -65,3 +65,18 @@ The 40-frame KITTI validation experiment uses the same frozen B2a pairs for both
 See [the full evaluation report](evaluation/summary.json). Training and evaluation entry points remain in `scripts/`. KITTI data is obtained separately.
 
 [Real KITTI E20 paired-NMS validation](docs/paired_nms_e20_validation.md).
+
+## Car foreground disparity
+
+Train the Mask head with the published fixed-grid model and the frozen candidate archive from the paired NMS evaluation:
+
+```bash
+PYTHONPATH=src python scripts/train_mask_only.py \
+  --dataset-root /path/to/KITTI --train-json /path/to/train.json --val-json /path/to/val.json \
+  --openstereo-source OpenStereo --candidate-archive e20_candidates.json --replay e20_replay.json \
+  --output-dir outputs/mask_only --device cpu
+```
+
+The entry point pins the 144/16 development split and the eight training frames. It recomputes the E20 Mask on archived pairs and starts the full training run after the eight-frame gate passes. See `baseline.json`, `overfit_gate.json`, and `formal_gate.json` for results. The crop-grid Mask IoU is a per-instance mean. Precision and recall pool valid pixels. The original-image Mask metrics use the existing left crop transform.
+
+A checkpoint that passes the formal Car gate is exported as `foreground_ready.pt`. Given that checkpoint, `infer.py` returns `foreground_disparity` and `foreground_validity` on the fixed disparity grid. The row's `pair_ids` field holds the frame-local detector candidate ID. Background and unsupported categories have invalid foreground disparity values. Existing E20 bundles have no validated foreground classes. The original `disparity` array still provides the rectangular result for diagnostics.
