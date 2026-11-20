@@ -82,3 +82,27 @@ The entry point pins the 144/16 development split and the eight training frames.
 A checkpoint that passes the formal Car gate is exported as `foreground_ready.pt`. Given that checkpoint, `infer.py` returns `foreground_disparity` and `foreground_validity` on the fixed disparity grid. The row's `pair_ids` field holds the frame-local detector candidate ID. Background and unsupported categories have invalid foreground disparity values. Existing E20 bundles have no validated foreground classes. The original `disparity` array still provides the rectangular result for diagnostics.
 
 The optional `--mask-head context` trains a compact encoder-decoder on the same left RoI, preserving the `28×28` Mask output. It starts that Mask head fresh and uses class-weighted BCE. The rest of the published E20 network stays frozen. The training stage rechecks the eight-frame gate for the selected head before formal fitting.
+
+## Experimental foreground evaluation checkpoint
+
+`models/foreground_evaluation.pt` is the exact Car-only checkpoint used for the 40-frame foreground evaluation. It uses the epoch-25 context Mask from the per-instance BCE+Dice run with its development-selected Mask threshold 0.40 folded into the final logit bias. The detector, shared encoder and local iDisp weights come from E20. The inference entry point defaults to the original E20 checkpoint.
+
+**Development gate override.** The checkpoint was evaluated after explicitly bypassing the development-set GT-RoI Mask IoU requirement of **75%**. It measured **73.83%** GT-RoI Mask IoU and **76.77%** Pred-RoI Mask IoU on the 16-frame development split.
+
+The original KITTI 40-frame acceptance criteria were evaluated as specified, using the 28×28 crop grid.
+
+| Cohort | Mask IoU | Foreground precision | Foreground recall |
+| --- | ---: | ---: | ---: |
+| GT-RoI, 257 cars | 69.42% | 82.86% | 89.83% |
+| Fixed Pred-RoI, 149 cars | 75.47% | 86.29% | 89.81% |
+
+The fixed Pred-RoI metrics passed. The GT-RoI result was below the 75% acceptance threshold. This artifact is designated for evaluation. With score 0.40, top-K 500 and class-aware paired NMS at IoU 0.70, the 149 matched cars had 92.65% valid GT foreground coverage and 10.49% background among exported foreground pixels. On the retained GT foreground pixels, EPE was 2.25 px and D1 was 19.02%.
+
+Verify the artifact with `sha256sum -c models/SHA256SUMS`. Use it explicitly for inference:
+
+```bash
+PYTHONPATH=src python scripts/infer.py \
+  --weights models/foreground_evaluation.pt --openstereo-source OpenStereo \
+  --left /path/to/left.png --right /path/to/right.png \
+  --score .40 --paired-nms --paired-nms-iou .70 --output foreground_eval.npz
+```
