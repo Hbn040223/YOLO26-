@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from dataclasses import dataclass
+import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -105,21 +106,34 @@ def paired_nms(
     if not 0 <= iou_threshold <= 1:
         raise ValueError("paired NMS IoU must be between 0 and 1")
     order = scores.argsort(descending=True, stable=True)
-    kept: list[Tensor] = []
-    right_boxes = torch.stack((boxes6[:, 4], boxes6[:, 1], boxes6[:, 5], boxes6[:, 3]), 1)
-    while order.numel():
-        current = order[0]
-        kept.append(current)
-        if order.numel() == 1:
-            break
-        remain = order[1:]
-        left = _iou(boxes6[order[:1], :4], boxes6[remain, :4]).squeeze(0)
-        right = _iou(right_boxes[order[:1]], right_boxes[remain]).squeeze(0)
-        survives = torch.minimum(left, right) <= iou_threshold
-        if classes is not None:
-            survives |= classes[remain] != classes[current]
-        order = remain[survives]
-    indices = torch.stack(kept) if kept else order
+    indices = order
+    count = order.numel()
+    if count > 1:
+        with torch.no_grad():
+            sorted_boxes = boxes6[order]
+            left = sorted_boxes[:, :4]
+            right = sorted_boxes[:, [4, 1, 5, 3]]
+            sorted_classes = classes[order] if classes is not None else None
+            suppressed = np.zeros(count, dtype=bool)
+            kept = []
+            # The normal capped pool fits in one block. Bound temporary memory
+            # for callers that turn the pre-NMS candidate cap off.
+            rows_per_block = max(1, 1024**2 // count)
+            for start in range(0, count, rows_per_block):
+                stop = min(start + rows_per_block, count)
+                paired_iou = torch.minimum(_iou(left[start:stop], left[start:]),
+                                           _iou(right[start:stop], right[start:]))
+                removes = ~(paired_iou <= iou_threshold)
+                if sorted_classes is not None:
+                    removes &= sorted_classes[start:stop, None] == sorted_classes[None, start:]
+                # Transfer one boolean mask per block. Greedy suppression uses
+                # score order on the CPU without a per-candidate CUDA sync.
+                removes_cpu = removes.cpu().numpy()
+                for index in range(start, stop):
+                    if not suppressed[index]:
+                        kept.append(index)
+                        suppressed[index + 1:] |= removes_cpu[index - start, index + 1 - start:]
+            indices = order[torch.as_tensor(kept, dtype=torch.long, device=order.device)]
     return PairDetections(boxes6[indices], scores[indices], indices,
                           classes[indices] if classes is not None else None)
 

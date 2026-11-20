@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import torch
@@ -11,8 +12,29 @@ sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "src")]
 
 from evaluate_paired_nms import evaluate
 from benchmark_paired_nms import benchmark
+from lightbackbone_stereo_yolo import detection
 from lightbackbone_stereo_yolo.detection import anchorfree_candidate_indices, paired_nms
 from lightbackbone_stereo_yolo.training_metrics import greedy_match_paired_detections
+
+
+def legacy_paired_nms_indices(boxes, scores, threshold, classes):
+    order = scores.argsort(descending=True, stable=True)
+    right = boxes[:, [4, 1, 5, 3]]
+    keep = []
+    while order.numel():
+        keep.append(order[0])
+        if order.numel() == 1:
+            break
+        first, rest = order[:1], order[1:]
+        overlaps = torch.minimum(
+            detection._iou(boxes[first, :4], boxes[rest, :4]),
+            detection._iou(right[first], right[rest]),
+        )[0]
+        survives = overlaps <= threshold
+        if classes is not None:
+            survives |= classes[rest] != classes[first]
+        order = rest[survives]
+    return torch.stack(keep) if keep else order
 
 
 class PairedNmsEvaluationTest(unittest.TestCase):
@@ -33,6 +55,46 @@ class PairedNmsEvaluationTest(unittest.TestCase):
             self.assertEqual(paired_nms(boxes[:count], scores[:count]).indices.tolist(), list(range(count)))
         _, topk = anchorfree_candidate_indices(scores, .5, 2)
         self.assertEqual(topk.tolist(), [0, 1])
+
+    def test_matrix_iou_replaces_per_candidate_overlap_calls(self):
+        shifts = torch.arange(12).float() * 10
+        boxes = torch.stack((shifts, shifts, shifts + 4, shifts + 4, shifts, shifts + 4), dim=1)
+        scores = torch.ones(len(boxes))
+        with patch.object(detection, "_iou", wraps=detection._iou) as overlaps:
+            result = paired_nms(boxes, scores)
+        self.assertEqual(result.indices.tolist(), list(range(len(boxes))))
+        self.assertEqual(overlaps.call_count, 2)
+
+    def test_matrix_nms_preserves_legacy_order_and_aligned_fields(self):
+        rng = torch.Generator().manual_seed(17)
+        # Use clustered boxes, tied scores and right offsets to exercise suppression.
+        x, y, w, h, offset, w_right = torch.rand((6, 58), generator=rng)
+        x, y, w, h, offset, w_right = x * 24, y * 24, w * 32, h * 32, offset * 10, w_right * 32
+        boxes = torch.stack((x, y, x + w, y + h, x - offset, x - offset + w_right), dim=1)
+        boxes[8:16] = boxes[:8]
+        boxes[-1, 0] = float("nan")
+        scores = torch.randint(0, 8, (len(boxes),), generator=rng).float()
+        classes = torch.randint(0, 3, (len(boxes),), generator=rng)
+        devices = ("cpu", "cuda") if torch.cuda.is_available() else ("cpu",)
+        for device in devices:
+            b, s, c = boxes.to(device), scores.to(device), classes.to(device)
+            for class_ids in (None, c):
+                for threshold in (0., .5, .6, .7, 1.):
+                    expected = legacy_paired_nms_indices(b, s, threshold, class_ids)
+                    result = paired_nms(b, s, threshold, classes=class_ids)
+                    torch.testing.assert_close(result.indices, expected, rtol=0, atol=0)
+                    torch.testing.assert_close(result.boxes6, b[expected], rtol=0, atol=0, equal_nan=True)
+                    torch.testing.assert_close(result.scores, s[expected], rtol=0, atol=0)
+                    if class_ids is None:
+                        self.assertIsNone(result.classes)
+                    else:
+                        torch.testing.assert_close(result.classes, class_ids[expected], rtol=0, atol=0)
+
+    def test_large_candidate_pool_preserves_nms_across_matrix_blocks(self):
+        boxes = torch.tensor([[0., 0., 4., 4., 0., 4.]]).repeat(1050, 1)
+        boxes[-2:, [0, 2, 4, 5]] += 10
+        result = paired_nms(boxes, torch.ones(len(boxes)))
+        self.assertEqual(result.indices.tolist(), [0, 1048])
 
     def test_paired_match_cannot_mix_ground_truth_views_or_classes(self):
         gt = torch.tensor([[0., 0., 4., 4., 0., 4.], [8., 0., 12., 4., 8., 12.]])
