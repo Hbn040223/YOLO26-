@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 import sys
+import warnings
 
 import numpy as np
 import torch
@@ -13,12 +15,30 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from lightbackbone_stereo_yolo.data.frame_dataset import normalized_rgb
 from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_backbone
+from lightbackbone_stereo_yolo.mask import mask_logit_cutoff
 from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead, StereoYoloLocalModel
 from lightbackbone_stereo_yolo.stereo_yolo26 import StereoYOLO26PanHead
 
 
+def resolve_mask_threshold(bundle, override=None):
+    # The published E25 stores bias-folded logits. New exports store raw logits.
+    if override is None:
+        threshold = float(bundle.get("mask_threshold", .50))
+        mask_logit_cutoff(threshold)
+        return threshold
+    cutoff = mask_logit_cutoff(override)
+    folded_threshold = bundle.get("mask_evaluation", {}).get("threshold_before_logit_calibration")
+    if folded_threshold is None:
+        return override
+    shift = cutoff - mask_logit_cutoff(folded_threshold)
+    if shift >= 0:
+        return 1 / (1 + math.exp(-shift))
+    value = math.exp(shift)
+    return value / (1 + value)
+
+
 def load_published_model(weights, openstereo_source, device, *, score=.40, topk=500,
-                         apply_paired_nms=None, paired_nms_iou=.5):
+                         apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None):
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
@@ -34,6 +54,7 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
         apply_paired_nms=apply_paired_nms, paired_nms_iou=paired_nms_iou,
         foreground_class_indices=tuple(bundle["class_mapping"][key]
                                        for key in bundle.get("foreground_mask_raw_classes", ())),
+        mask_threshold=resolve_mask_threshold(bundle, mask_threshold),
     )
     model.load_state_dict(bundle["model"], strict=True)
     return model.to(device).eval(), bundle
@@ -49,6 +70,7 @@ def main() -> None:
     parser.add_argument("--score", type=float, default=.40)
     parser.add_argument("--paired-nms", action="store_true", help="opt in to class-aware stereo pair suppression")
     parser.add_argument("--paired-nms-iou", type=float, default=.5)
+    parser.add_argument("--mask-threshold", type=float, help="override the probability cutoff in the unfurled Mask logit space")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     torch.set_num_threads(2)
@@ -58,7 +80,11 @@ def main() -> None:
     model, bundle = load_published_model(
         args.weights, args.openstereo_source, args.device, score=args.score,
         apply_paired_nms=True if args.paired_nms else None, paired_nms_iou=args.paired_nms_iou,
+        mask_threshold=args.mask_threshold,
     )
+    if not model.foreground_class_indices:
+        warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",
+                      stacklevel=2)
     normalization = bundle["normalization"]
     left, right = (
         normalized_rgb(path, normalization["mean"], normalization["std"])[None].to(args.device)
@@ -76,6 +102,8 @@ def main() -> None:
             arrays["mask_probability"] = result.mask_logits.sigmoid().cpu().numpy()
             arrays["foreground_disparity"] = result.disparity.masked_fill(
                 ~result.foreground_validity, torch.nan).cpu().numpy()
+            arrays["foreground_supported"] = np.asarray(bool(model.foreground_class_indices))
+            arrays["mask_threshold_on_saved_logits"] = np.asarray(model.mask_threshold)
             arrays["foreground_supported_raw_classes"] = np.asarray(
                 bundle.get("foreground_mask_raw_classes", ()), dtype=np.int64)
     finally:

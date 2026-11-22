@@ -1,5 +1,8 @@
 """Lightweight left-view instance-mask branch."""
 from __future__ import annotations
+
+import math
+
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -50,21 +53,40 @@ class ContextInstanceMaskHead(nn.Module):
 
 
 def mask_loss(mask_logits: Tensor, target_mask: Tensor, valid: Tensor, *,
-              pos_weight: Tensor | None = None) -> Tensor:
+              pos_weight: Tensor | None = None, dice_weight: float = 0.) -> Tensor:
+    if not math.isfinite(dice_weight) or dice_weight < 0:
+        raise ValueError("dice_weight must be finite and nonnegative")
     per_pixel = F.binary_cross_entropy_with_logits(
         mask_logits, target_mask, reduction="none", pos_weight=pos_weight,
     )
     weighted = per_pixel * valid.to(per_pixel.dtype)
-    return weighted.sum() / valid.sum().clamp_min(1)
+    if not dice_weight:
+        return weighted.sum() / valid.sum().clamp_min(1)
+    spatial = valid.flatten(1)
+    pixel_count = spatial.sum(1)
+    bce = weighted.flatten(1).sum(1) / pixel_count.clamp_min(1)
+    probability = mask_logits.sigmoid().flatten(1) * spatial
+    truth = target_mask.flatten(1) * spatial
+    dice = 1 - (2 * (probability * truth).sum(1) + 1) / (probability.sum(1) + truth.sum(1) + 1)
+    present = pixel_count > 0
+    return ((bce + dice_weight * dice) * present).sum() / present.sum().clamp_min(1)
+
+
+def mask_logit_cutoff(mask_threshold: float) -> float:
+    if not 0 < mask_threshold < 1:
+        raise ValueError("mask threshold must be strictly between zero and one")
+    return math.log(mask_threshold / (1 - mask_threshold))
 
 
 
 def foreground_disparity_validity(
     mask_logits: Tensor, mask_validity: Tensor, disparity: Tensor,
-    disparity_validity: Tensor, supported: Tensor,
+    disparity_validity: Tensor, supported: Tensor, *, mask_threshold: float = .50,
 ) -> Tensor:
     """Return instance foreground validity on the deployed disparity grid."""
-    probabilities = F.interpolate(mask_logits.sigmoid(), size=disparity.shape[-2:],
+    # Apply the cutoff before resizing to preserve logit-bias calibration.
+    calibrated = mask_logits - mask_logit_cutoff(mask_threshold)
+    probabilities = F.interpolate(calibrated.sigmoid(), size=disparity.shape[-2:],
                                   mode="bilinear", align_corners=False)[:, 0]
     spatial = F.interpolate(mask_validity.float(), size=disparity.shape[-2:], mode="nearest")[:, 0].bool()
     return (supported[:, None, None] & (probabilities > .50)

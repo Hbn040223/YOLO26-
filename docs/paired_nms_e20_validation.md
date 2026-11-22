@@ -95,3 +95,17 @@ A second run on November 20, 2026 used PR commit `258cb60` and the same E20 chec
 | Mean Mask IoU on each arm's matches | 0.3023 | 0.3065 |
 
 Usable disparity requires a paired hit, finite disparity and at least 85% coverage of the annotated foreground. Both arms reproduced the original per-frame paired-hit identities and kept-pair counts. All 80 saved NPZ files passed archive and shape checks. On this run NMS reduces the mean output size from 753 to 282 KiB. It also increases total latency at both measured percentiles and loses five matched GTs. The timing suites in this section and the preceding CUDA section have different measurement boundaries and server load.
+
+
+## Batched NMS retest, same E20 checkpoint
+
+Commit 16bf7ef was measured on the same 40-frame validation split and released E20 checkpoint. A shared RTX 6000 Ada (GPU 6) ran FP32, batch 1, two CPU threads and three alternating timed forwards per frame. Timing starts after image transfer and ends with model outputs. The earlier measurements above retain their original scope. Offline replay verified identical ordered IDs, coordinates, classes and scores for each fixed threshold.
+
+| Paired NMS IoU | RoI pairs | NMS old P50, ms | NMS batched P50, ms | Batched model P50, ms | Batched model P95, ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Disabled | 2,323 | 0 | 0 | 50.63 | 115.12 |
+| 0.70 | 863 | 16.04 | 1.14 | 27.86 | 78.11 |
+| 0.60 | 655 | 12.34 | 1.12 | 27.35 | 67.84 |
+| 0.50 | 530 | 9.49 | 1.06 | 25.98 | 63.62 |
+
+The batched path reduced both model P50 and P95 versus disabled NMS in this shared-GPU run. At 0.70 its NMS P95 was 10.33 ms. For the 23-car near cohort, the same 19 GTs matched at all settings. The batched path preserves the existing precision and coverage at each threshold.

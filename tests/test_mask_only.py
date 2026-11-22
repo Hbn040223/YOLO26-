@@ -77,3 +77,56 @@ class ContextMaskContract(unittest.TestCase):
         self.assertEqual(tuple(result.shape), (2, 1, 28, 28))
         result.square().mean().backward()
         self.assertTrue(all(p.grad is not None and torch.isfinite(p.grad).all() for p in head.mask.parameters()))
+
+
+class ForegroundReproducibilityTest(unittest.TestCase):
+    def test_instance_bce_dice_ignores_empty_instances(self):
+        from lightbackbone_stereo_yolo.mask import mask_loss
+
+        logits = torch.zeros(2, 1, 1, 2, requires_grad=True)
+        truth = torch.tensor([[[[1., 0.]]], [[[0., 0.]]]])
+        valid = torch.tensor([[[[True, True]]], [[[False, False]]]])
+        loss = mask_loss(logits, truth, valid, dice_weight=1.)
+        self.assertAlmostEqual(float(loss), .693147 + 1 / 3, places=6)
+        loss.backward()
+        self.assertTrue(torch.equal(logits.grad[1], torch.zeros_like(logits.grad[1])))
+
+    def test_runtime_threshold_preserves_legacy_fold_before_resize(self):
+        from math import log
+        from lightbackbone_stereo_yolo.mask import foreground_disparity_validity
+
+        logits = torch.tensor([[[[-.3, .05]]]])
+        valid = torch.ones_like(logits, dtype=torch.bool)
+        disparity = torch.ones((1, 2, 3))
+        support = torch.tensor([True])
+        expected = foreground_disparity_validity(
+            logits - log(.4 / .6), valid, disparity, disparity.bool(), support)
+        actual = foreground_disparity_validity(
+            logits, valid, disparity, disparity.bool(), support, mask_threshold=.4)
+        self.assertTrue(torch.equal(expected, actual))
+        self.assertFalse(torch.equal(actual, foreground_disparity_validity(
+            logits, valid, disparity, disparity.bool(), support, mask_threshold=.5)))
+
+    def test_legacy_bundle_threshold_and_explicit_override(self):
+        from scripts.infer import resolve_mask_threshold
+
+        legacy = {"mask_evaluation": {"threshold_before_logit_calibration": .4}}
+        self.assertEqual(resolve_mask_threshold(legacy), .5)
+        self.assertAlmostEqual(resolve_mask_threshold(legacy, .4), .5)
+        self.assertEqual(resolve_mask_threshold({"mask_threshold": .4}), .4)
+
+    def test_development_override_is_recorded_without_passing_gate(self):
+        from pathlib import Path
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from train_mask_only import development_gate
+
+        strict = development_gate(.7383, .7677, .75, False)
+        override = development_gate(.7383, .7677, .75, True)
+        self.assertFalse(strict["eligible_for_evaluation"])
+        self.assertTrue(override["eligible_for_evaluation"])
+        self.assertFalse(override["dev_gate_passed"])
+        self.assertTrue(override["gate_override"])
+        self.assertEqual(override["dev_gt_iou"], .7383)
+        self.assertFalse(development_gate(None, .80, .75, True)["eligible_for_evaluation"])

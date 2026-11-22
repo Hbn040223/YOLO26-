@@ -103,9 +103,10 @@ class StereoYoloLocalModel(nn.Module):
 
     def __init__(
         self, encoder: nn.Module, detector: StereoYoloHead, instance_head: StereoLocalInstanceHead,
-        score_threshold: float = .05, pre_nms_topk: int = 500, detector_variant: str = "baseline", *,
+        score_threshold: float = .40, pre_nms_topk: int = 500, detector_variant: str = "baseline", *,
         right_offset_mode: str = "legacy_clamp", apply_paired_nms: bool | None = None,
         paired_nms_iou: float = .5, foreground_class_indices: tuple[int, ...] = (),
+        mask_threshold: float = .50,
     ) -> None:
         super().__init__()
         self.encoder, self.detector, self.instance_head, self.score_threshold, self.pre_nms_topk, self.detector_variant = encoder, detector, instance_head, score_threshold, pre_nms_topk, detector_variant
@@ -119,6 +120,9 @@ class StereoYoloLocalModel(nn.Module):
         if foreground_class_indices and instance_head.roi_sampling != "fixed_56":
             raise ValueError("foreground disparity export requires the fixed_56 grid")
         self.foreground_class_indices = foreground_class_indices
+        if not 0 < mask_threshold < 1:
+            raise ValueError("mask threshold must be strictly between zero and one")
+        self.mask_threshold = mask_threshold
 
     def forward(self, left: Tensor, right: Tensor) -> StereoYoloLocalOutput:
         if left.shape[0] != 1:
@@ -133,7 +137,7 @@ class StereoYoloLocalModel(nn.Module):
                 right_offset_mode=self.right_offset_mode,
                 apply_nms=(not getattr(self.detector, "one_to_one_enabled", False)
                            if self.apply_paired_nms is None else self.apply_paired_nms),
-                class_aware_nms=self.apply_paired_nms is True,
+                class_aware_nms=True,
             )
         elif self.detector_variant == "baseline":
             levels = (
@@ -144,7 +148,7 @@ class StereoYoloLocalModel(nn.Module):
             anchors = generate_grid_anchors(levels, left.device)
             pair = decode_dense_predictions(
                 {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
-                anchors, self.score_threshold, pre_nms_topk=self.pre_nms_topk,
+                anchors, self.score_threshold, nms_threshold=self.paired_nms_iou, pre_nms_topk=self.pre_nms_topk,
             )
         else:
             raise ValueError("unsupported detector_variant")
@@ -172,6 +176,7 @@ class StereoYoloLocalModel(nn.Module):
             supported = (pair.classes[:, None] == classes).any(1)
             foreground = foreground_disparity_validity(
                 instance.mask_logits, instance.mask_validity, instance.disparity, instance.validity, supported,
+                mask_threshold=self.mask_threshold,
             )
         return StereoYoloLocalOutput(
             pair_ids=pair.indices, foreground_validity=foreground, boxes_left=boxes_left, boxes_right=boxes_right,

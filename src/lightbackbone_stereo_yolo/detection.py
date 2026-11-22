@@ -162,7 +162,7 @@ def decode_dense_predictions(
         _, top_order = scores[chosen_indices].topk(pre_nms_topk)
         chosen_indices = chosen_indices[top_order]
     decoded = decode_boxes6(box6[chosen_indices], anchors[chosen_indices])
-    kept = paired_nms(decoded, scores[chosen_indices], nms_threshold)
+    kept = paired_nms(decoded, scores[chosen_indices], nms_threshold, classes=class_index[chosen_indices])
     return PairDetections(kept.boxes6, kept.scores, chosen_indices[kept.indices], class_index[chosen_indices][kept.indices])
 
 
@@ -320,7 +320,7 @@ def anchorfree_candidate_indices(scores: Tensor, score_threshold: float, pre_nms
 
 def suppress_anchorfree_candidates(
     decoded: Tensor, indices: Tensor, scores: Tensor, classes: Tensor, nms_threshold: float,
-    *, apply_nms: bool = True, class_aware_nms: bool = False,
+    *, apply_nms: bool = True, class_aware_nms: bool = True,
 ) -> tuple[PairDetections, PairDetections]:
     # Finite encoded values can still overflow in expm1 or sinh.
     valid = torch.isfinite(decoded).all(dim=1)
@@ -331,7 +331,7 @@ def suppress_anchorfree_candidates(
 
 
 def select_anchorfree_pairs(
-    pre: PairDetections, nms_threshold: float, *, apply_nms: bool, class_aware_nms: bool = False,
+    pre: PairDetections, nms_threshold: float, *, apply_nms: bool, class_aware_nms: bool = True,
 ) -> PairDetections:
     """Run both ablation arms from the same valid pre-NMS pool."""
     if not apply_nms:
@@ -352,7 +352,7 @@ def decode_anchorfree_predictions(
     *,
     right_offset_mode: str = "legacy_clamp",
     apply_nms: bool = True,
-    class_aware_nms: bool = False,
+    class_aware_nms: bool = True,
 ) -> PairDetections:
     """Decode aligned stereo pairs, optionally applying pair-preserving NMS."""
     from .geometry import decode_anchorfree_boxes6

@@ -140,10 +140,11 @@ def _car_deployment_counts(
 
 @torch.no_grad()
 def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: Tensor, target: dict,
-                                       score_threshold: float = .25, pre_score_threshold: float = .01,
+                                       score_threshold: float = .40, pre_score_threshold: float = .01,
                                        pre_nms_topk: int = 500, *,
                                        right_offset_mode: str = "legacy_clamp",
-                                       car_cohort: tuple[int, list[int]] | None = None) -> dict:
+                                       car_cohort: tuple[int, list[int]] | None = None,
+                                       paired_nms_iou: float = .70) -> dict:
     """Detector-only validation: raw, score-filtered pre-NMS, and deployed paired metrics."""
     from .detection import anchorfree_prediction_scores, decode_anchorfree_predictions
     from .geometry import decode_anchorfree_boxes6, generate_point_locations, point_levels
@@ -168,12 +169,17 @@ def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: T
     deployed = decode_anchorfree_predictions(
         dense_dict, locations, score_threshold=score_threshold,
         pre_nms_topk=pre_nms_topk, right_offset_mode=right_offset_mode,
-        apply_nms=not getattr(detector, "one_to_one_enabled", False),
+        nms_threshold=paired_nms_iou, apply_nms=True,
     )
-    match = greedy_match_paired_detections(deployed.boxes6, targets, deployed.scores, .5)
+    target_classes = target["classes"].to(left.device)
+    match = greedy_match_paired_detections(
+        deployed.boxes6, targets, deployed.scores, .5,
+        prediction_classes=deployed.classes, target_classes=target_classes,
+    )
     pred_left, pred_right = pair_boxes_to_lr(deployed.boxes6)
     target_left, target_right = pair_boxes_to_lr(targets)
     qualifies = torch.minimum(_pairwise_iou(pred_left, target_left), _pairwise_iou(pred_right, target_right)) >= .5
+    qualifies &= deployed.classes[:, None] == target_classes[None, :]
     duplicate_pairs = qualifies.any(dim=1).sum() - match.matched_count
     raw_hits = hits(raw)
     deployed_hits = hits(deployed.boxes6)
@@ -190,15 +196,15 @@ def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: T
     size_groups = {name: dict(zip(("gt", "raw_left_hits", "deployed_left_hits", "paired_hits"), counts))
                    for name, counts in zip(groups, size_counts)}
     result = {"target_count": int(targets.shape[0]), "raw_dense_left_hits": int(raw_hits.sum()),
-            "pre_nms_left_hits_score_001": int(hits(pre).sum()), "deployment_left_hits_score_025": int(deployed_hits.sum()),
-            "paired_hits_score_025": match.matched_count, "post_nms_pairs_score_025": int(deployed.boxes6.shape[0]),
+            "pre_nms_left_hits_score_001": int(hits(pre).sum()), "deployment_left_hits": int(deployed_hits.sum()),
+            "paired_hits": match.matched_count, "post_nms_pairs": int(deployed.boxes6.shape[0]),
             "paired_duplicate_predictions": int(duplicate_pairs), "detection_size_groups": size_groups}
     if car_cohort is not None:
         if not getattr(detector, "one_to_one_enabled", False):
             raise ValueError("the car cohort audit requires one-to-one deployment")
-        car_pairs = decode_anchorfree_predictions(
+        car_pairs = deployed if score_threshold == .40 else decode_anchorfree_predictions(
             dense_dict, locations, score_threshold=.40, pre_nms_topk=pre_nms_topk,
-            right_offset_mode=right_offset_mode, apply_nms=False,
+            right_offset_mode=right_offset_mode, nms_threshold=paired_nms_iou, apply_nms=True,
         )
         car_class, near_indices = car_cohort
         valid_score = torch.isfinite(scores[finite][finite_raw])
@@ -212,9 +218,9 @@ def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: T
 
 def evaluate_pred_roi_frame(
     encoder, detector, instance_head, left: Tensor, right: Tensor, target: dict,
-    dmax_roi: int, detector_variant: str, score_threshold: float=.05,
+    dmax_roi: int, detector_variant: str, score_threshold: float=.40,
     roi_margin: float=16., minimum_quality: float=.5,
-    *, right_offset_mode: str = "legacy_clamp",
+    *, right_offset_mode: str = "legacy_clamp", paired_nms_iou: float = .70,
 ) -> dict:
     """Evaluate prediction-driven RoIs using the same mask/iDisp metric formula as GT-RoI."""
     from .detection import decode_anchorfree_predictions, decode_dense_predictions, generate_grid_anchors
@@ -227,15 +233,19 @@ def evaluate_pred_roi_frame(
     if detector_variant=="stereo_yolo26_pan":
         pairs=decode_anchorfree_predictions(
             dense_dict, generate_point_locations(point_levels(pyramid), left.device), score_threshold,
-            right_offset_mode=right_offset_mode, apply_nms=not getattr(detector, "one_to_one_enabled", False),
+            right_offset_mode=right_offset_mode, nms_threshold=paired_nms_iou, apply_nms=True,
         )
     elif detector_variant=="baseline":
         levels=((pyramid.p3_left.shape[-2],pyramid.p3_left.shape[-1],8,32.),(pyramid.p4_left.shape[-2],pyramid.p4_left.shape[-1],16,64.),(pyramid.c5_left.shape[-2],pyramid.c5_left.shape[-1],32,128.))
-        pairs=decode_dense_predictions(dense_dict,generate_grid_anchors(levels,left.device),score_threshold)
+        pairs=decode_dense_predictions(dense_dict,generate_grid_anchors(levels,left.device),score_threshold,
+                                       nms_threshold=paired_nms_iou)
     else:
         raise ValueError("unsupported detector_variant")
     boxes=target["boxes6"].to(left.device)
-    match=greedy_match_paired_detections(pairs.boxes6,boxes,pairs.scores,minimum_quality)
+    match=greedy_match_paired_detections(
+        pairs.boxes6, boxes, pairs.scores, minimum_quality,
+        prediction_classes=pairs.classes, target_classes=target["classes"].to(left.device),
+    )
     result={"matched_count":match.matched_count,"target_count":match.target_count,"coverage":match.matched_count/max(match.target_count,1),"iou_sum":0.,"iou_count":0,"epe_sum":0.,"epe_count":0,"d1_hit":0,"d1_count":0}
     if not match.matched_count:
         return result

@@ -79,17 +79,26 @@ PYTHONPATH=src python scripts/train_mask_only.py \
 
 The entry point pins the 144/16 development split and the eight training frames. It recomputes the E20 Mask on archived pairs and starts the full training run after the eight-frame gate passes. See `baseline.json`, `overfit_gate.json`, and `formal_gate.json` for results. The crop-grid Mask IoU is a per-instance mean. Precision and recall pool valid pixels. The original-image Mask metrics use the existing left crop transform.
 
-A checkpoint that passes the formal Car gate is exported as `foreground_ready.pt`. Given that checkpoint, `infer.py` returns `foreground_disparity` and `foreground_validity` on the fixed disparity grid. The row's `pair_ids` field holds the frame-local detector candidate ID. Background and unsupported categories have invalid foreground disparity values. Existing E20 bundles have no validated foreground classes. The original `disparity` array still provides the rectangular result for diagnostics.
+A checkpoint that passes the formal Car gate is exported as `foreground_ready.pt`. Given that checkpoint, `infer.py` returns `foreground_disparity` and `foreground_validity` on the fixed disparity grid. The row's `pair_ids` field holds the frame-local detector candidate ID. Background and unsupported categories have invalid foreground disparity values. Existing E20 bundles have no validated foreground classes. The CLI warns and writes foreground_supported=false for such bundles. The original `disparity` array still provides the rectangular result for diagnostics.
 
 The optional `--mask-head context` trains a compact encoder-decoder on the same left RoI, preserving the `28×28` Mask output. It starts that Mask head fresh and uses class-weighted BCE. The rest of the published E20 network stays frozen. The training stage rechecks the eight-frame gate for the selected head before formal fitting.
 
 ## Experimental foreground evaluation checkpoint
 
-`models/foreground_evaluation.pt` is the exact Car-only checkpoint used for the 40-frame foreground evaluation. It uses the epoch-25 context Mask from the per-instance BCE+Dice run with its development-selected Mask threshold 0.40 folded into the final logit bias. The detector, shared encoder and local iDisp weights come from E20. The inference entry point defaults to the original E20 checkpoint.
+`models/foreground_evaluation.pt` is the exact Car-only checkpoint used for the 40-frame foreground evaluation. It uses the epoch-25 context Mask from the per-instance BCE+Dice run with its development-selected Mask threshold 0.40 folded into the final logit bias. The detector, shared encoder and local iDisp weights come from E20. The inference entry point defaults to the original E20 checkpoint. The legacy E25 bundle uses an effective cutoff of 0.50 on its stored logits. New exports store unfurled logits and an explicit mask_threshold. The --mask-threshold override uses the original probability scale for both formats.
 
-**Development gate override.** The checkpoint was evaluated after explicitly bypassing the development-set GT-RoI Mask IoU requirement of **75%**. It measured **73.83%** GT-RoI Mask IoU and **76.77%** Pred-RoI Mask IoU on the 16-frame development split.
+**Development gate override.** The checkpoint was evaluated after explicitly bypassing the development-set GT-RoI Mask IoU requirement of **75%**. It measured **73.83%** GT-RoI Mask IoU and **76.77%** Pred-RoI Mask IoU on the 16-frame development split. Those frames were held out from Mask fitting and had been seen by the frozen E20 network. Use the separate 40 frames for held-out results.
 
-The original KITTI 40-frame acceptance criteria were evaluated as specified, using the 28×28 crop grid.
+To replay the E23 to E25 continuation, first run the context Mask command above with --mask-head context and preserve its last.pt and neighboring overfit_gate.json. The first phase uses weighted BCE. Run the same data arguments with a fresh output directory and these additional options:
+
+```bash
+--stage formal --mask-head context --resume-mask outputs/mask_only/last.pt \
+--formal-epochs 2 --formal-lr 1e-4 --formal-order-seed 731 --dice-weight 1 --mask-threshold .40 --dev-gate-iou .75 --allow-mask-gate-override
+```
+
+The continuation restores the Mask optimizer and uses unweighted per-instance BCE plus Dice. The published E25 was selected at 0.40 from the original development sweep. The replay pins that selection cutoff. Starting from the saved E23 checkpoint, it reproduced the development and held-out IoUs. All 625 tensors matched the published checkpoint exactly after applying its original bias fold. An override records the failed development gate and exports foreground_evaluation.pt. A ready export requires both gates to pass.
+
+The original KITTI 40-frame acceptance criteria use the 28×28 crop grid as the primary coordinate system. Original-image metrics are reported separately.
 
 | Cohort | Mask IoU | Foreground precision | Foreground recall |
 | --- | ---: | ---: | ---: |
@@ -106,3 +115,27 @@ PYTHONPATH=src python scripts/infer.py \
   --left /path/to/left.png --right /path/to/right.png \
   --score .40 --paired-nms --paired-nms-iou .70 --output foreground_eval.npz
 ```
+
+
+## Near-car evaluation
+
+The near-car validation cohort contains 23 annotated cars with calibrated GT foreground median depth below 10 m. Use score 0.40, top-K 500 and class-aware paired matching at bilateral IoU 0.50. Training validation defaults to score 0.40 and class-aware paired NMS IoU 0.70. Record threshold changes with --score-threshold and --validation-paired-nms-iou when comparing runs.
+
+| Paired NMS IoU | Near cars matched | Extra qualifying pairs assigned to a near car | Near cars with extra pairs |
+| --- | ---: | ---: | ---: |
+| Disabled | 19 / 23 | 280 | 19 |
+| 0.70 | 19 / 23 | 29 | 14 |
+| 0.60 | 19 / 23 | 15 | 12 |
+| 0.50 | 19 / 23 | 4 | 4 |
+
+Each qualifying pair is assigned to its highest bilateral-IoU Car GT before counting extra pairs. All four settings missed the same four near cars. At 0.70, the E25 Mask yielded nonempty foreground disparity for 19 near cars. Seventeen of the original 23 also covered at least 85% of their valid GT foreground pixels. Changing the NMS threshold changed some winning pair IDs. A second run generated foreground disparity for the 19 matched cars at each setting, using the same E25 weights.
+
+| Paired NMS IoU | At least 85% foreground coverage, out of 23 | EPE on common foreground (px) | D1 on common foreground |
+| --- | ---: | ---: | ---: |
+| 0.70 | 17 / 23 | 3.61 | 35.96% |
+| 0.60 | 15 / 23 | 3.64 | 35.40% |
+| 0.50 | 16 / 23 | 3.44 | 32.41% |
+
+The common foreground contains 252,150 valid GT foreground pixels covered by all three settings. These are near-car validation measurements, conditional on detection for EPE and D1. The <10 m cohort is selected by GT for measurement. The inference model still processes all retained pairs.
+
+See the [matrix NMS benchmark](docs/paired_nms_e20_validation.md#batched-nms-retest--same-e20-checkpoint) for updated latency.

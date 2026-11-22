@@ -19,7 +19,7 @@ from lightbackbone_stereo_yolo.data.frame_dataset import KittiFrameDataset, buil
 from lightbackbone_stereo_yolo.detection import decode_anchorfree_predictions
 from lightbackbone_stereo_yolo.geometry import generate_point_locations, point_levels
 from lightbackbone_stereo_yolo.idisp_ab import project_disparity
-from lightbackbone_stereo_yolo.mask import ContextInstanceMaskHead, mask_loss
+from lightbackbone_stereo_yolo.mask import mask_logit_cutoff, ContextInstanceMaskHead, mask_loss
 from lightbackbone_stereo_yolo.training import freeze_for_mask_only, prepare_mask_rois
 from lightbackbone_stereo_yolo.training_control import append_jsonl_record
 from lightbackbone_stereo_yolo.training_metrics import (
@@ -237,11 +237,12 @@ def grouped(rows, car_class):
 
 
 @torch.no_grad()
-def evaluate_mask(model, entries, device, car_class, *, original=False, detail=False):
+def evaluate_mask(model, entries, device, car_class, *, original=False, detail=False, mask_threshold=.50):
     model.instance_head.mask.eval()
     grid_rows, original_rows = [], []
+    cutoff = mask_logit_cutoff(mask_threshold)
     for entry in entries:
-        logits = model.instance_head.mask(entry["features"].to(device)).cpu()
+        logits = model.instance_head.mask(entry["features"].to(device)).cpu() - cutoff
         add_rows(grid_rows, mask_pixel_counts(logits > 0, entry["target"], entry["valid"]), entry)
         if original:
             grid = entry["crop"]
@@ -284,12 +285,12 @@ def save(path, model, bundle, optimizer, epoch, step, metric):
     os.replace(temporary, path)
 
 
-def update_mask(model, entry, optimizer, device, pos_weight=None):
+def update_mask(model, entry, optimizer, device, pos_weight=None, *, dice_weight=0.):
     model.instance_head.mask.train()
     optimizer.zero_grad(set_to_none=True)
     logits = model.instance_head.mask(entry["features"].to(device))
     target, valid = (entry[key].to(device) for key in ("target", "valid"))
-    loss = mask_loss(logits, target.float(), valid, pos_weight=pos_weight)
+    loss = mask_loss(logits, target.float(), valid, pos_weight=pos_weight, dice_weight=dice_weight)
     loss.backward()
     norm = torch.nn.utils.clip_grad_norm_(model.instance_head.mask.parameters(), 10., error_if_nonfinite=True)
     if not torch.isfinite(loss):
@@ -333,7 +334,33 @@ def parse_args():
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--mask-head", choices=("light", "context"), default="light")
     parser.add_argument("--stage", choices=("baseline", "overfit", "formal", "all"), default="all")
-    return parser.parse_args()
+    parser.add_argument("--dev-gate-iou", type=float, default=.75)
+    parser.add_argument("--allow-mask-gate-override", action="store_true",
+                        help="export an evaluation-only bundle if the development IoU gate is missed")
+    parser.add_argument("--mask-threshold", type=float, default=.50)
+    parser.add_argument("--dice-weight", type=float, default=0.)
+    parser.add_argument("--formal-epochs", type=int, default=30, help="number of additional formal epochs")
+    parser.add_argument("--formal-lr", type=float)
+    parser.add_argument("--formal-order-seed", type=int)
+    parser.add_argument("--resume-mask", type=Path, help="continue a train_mask_only last.pt with its optimizer")
+    args = parser.parse_args()
+    if not (0 <= args.dev_gate_iou <= 1 and 0 < args.mask_threshold < 1
+            and 0 <= args.dice_weight < float("inf") and args.formal_epochs > 0
+            and (args.formal_lr is None or 0 < args.formal_lr < float("inf"))):
+        parser.error("invalid IoU, mask cutoff, Dice weight, epochs or learning rate")
+    if args.resume_mask is not None and args.stage != "formal":
+        parser.error("--resume-mask requires --stage formal")
+    return args
+
+
+def development_gate(gt_iou, pred_iou, minimum_iou, allow_override):
+    measured = gt_iou is not None and pred_iou is not None
+    passed = measured and gt_iou >= minimum_iou
+    override = measured and allow_override and not passed
+    return {
+        "dev_gate_iou": minimum_iou, "dev_gt_iou": gt_iou, "dev_pred_iou": pred_iou,
+        "dev_gate_passed": passed, "gate_override": override, "eligible_for_evaluation": passed or override,
+    }
 
 
 def run_formal(args, model, bundle, split, frozen, heldout, car_class):
@@ -344,66 +371,111 @@ def run_formal(args, model, bundle, split, frozen, heldout, car_class):
     if not train or not dev["pred"] or not any((row["target"] & row["valid"]).any() for row in train):
         raise RuntimeError("missing valid Car training or Pred-RoI development samples")
     context = args.mask_head == "context"
-    pos_weight = foreground_weight(train, args.device) if context else None
-    optimizer = torch.optim.AdamW(model.instance_head.mask.parameters(), lr=1e-3 if context else 3e-4)
-    best, last_significant, patience, steps = None, None, 0, 0
-    rng = random.Random(17)
-    for epoch in range(1, 31):
+    # The E23 context run used weighted BCE. Its E25 continuation used
+    # per-instance BCE + Dice with no positive reweighting.
+    pos_weight = foreground_weight(train, args.device) if context and not args.dice_weight else None
+    lr = args.formal_lr or (1e-3 if context else 3e-4)
+    optimizer = torch.optim.AdamW(model.instance_head.mask.parameters(), lr=lr)
+    start_epoch = steps = 0
+    if args.resume_mask is not None:
+        previous = torch.load(args.resume_mask, map_location=args.device, weights_only=True)
+        if previous["config"].get("mask_head_variant", "light") != args.mask_head:
+            raise ValueError("resume checkpoint Mask architecture differs")
+        model.load_state_dict(previous["model"], strict=True)
+        verify_frozen(model, frozen)
+        optimizer.load_state_dict(previous["optimizer"])
+        if args.formal_lr is not None:
+            for group in optimizer.param_groups:
+                group["lr"] = lr
+        start_epoch = previous["mask_only"]["epoch"]
+        steps = previous["mask_only"]["steps"]
+
+    seed = args.formal_order_seed if args.formal_order_seed is not None else 17
+    rng = random.Random(seed)
+    recipe = {
+        "objective": ("instance_bce_dice" if args.dice_weight
+                      else "weighted_bce" if pos_weight is not None else "bce"),
+        "dice_weight": args.dice_weight, "pos_weight": float(pos_weight) if pos_weight is not None else None,
+        "mask_threshold": args.mask_threshold, "formal_order_seed": seed,
+        "learning_rate": optimizer.param_groups[0]["lr"], "start_epoch": start_epoch,
+        "resume_mask_sha256": sha256(args.resume_mask) if args.resume_mask is not None else None,
+    }
+    best, best_observed, last_significant, patience = None, None, None, 0
+    for phase_epoch in range(1, args.formal_epochs + 1):
+        epoch = start_epoch + phase_epoch
         order = list(range(len(train)))
         rng.shuffle(order)
         losses = []
         for index in order:
-            loss, _ = update_mask(model, train[index], optimizer, args.device, pos_weight)
+            loss, _ = update_mask(model, train[index], optimizer, args.device, pos_weight,
+                                  dice_weight=args.dice_weight)
             losses.append(loss)
             steps += 1
-        gt = evaluate_mask(model, dev["gt"], args.device, car_class)["crop_grid"]["car"]
-        pred = evaluate_mask(model, dev["pred"], args.device, car_class)["crop_grid"]["car"]
-        metric = {"dev_gt": gt, "dev_pred": pred, "train_loss": sum(losses) / len(losses)}
+        gt, pred = (evaluate_mask(model, dev[name], args.device, car_class,
+                                  mask_threshold=args.mask_threshold)["crop_grid"]["car"]
+                    for name in ("gt", "pred"))
+        gate = development_gate(gt["iou"], pred["iou"], args.dev_gate_iou, args.allow_mask_gate_override)
+        if gt["iou"] is not None and (best_observed is None or gt["iou"] > best_observed["dev_gt_iou"]):
+            best_observed = gate
+        metric = {**recipe, **gate, "dev_gt": gt, "dev_pred": pred, "train_loss": sum(losses) / len(losses)}
         row = {"epoch": epoch, "steps": steps, **metric}
         append_jsonl_record(out / "formal_metrics.jsonl", row)
         print(json.dumps(row), flush=True)
         save(out / "last.pt", model, bundle, optimizer, epoch, steps, metric)
-        if gt["iou"] is not None and gt["iou"] >= .75 and pred["iou"] is not None:
-            if best is None or pred["iou"] > best:
-                best = pred["iou"]
+        if gate["eligible_for_evaluation"]:
+            rank = ((True, pred["iou"], gt["iou"]) if gate["dev_gate_passed"]
+                    else (False, gt["iou"], pred["iou"]))
+            if best is None or rank > best:
+                best = rank
                 save(out / "best_mask.pt", model, bundle, optimizer, epoch, steps, metric)
         score = pred["iou"]
         if score is not None and (last_significant is None or score >= last_significant + .005):
             last_significant, patience = score, 0
         else:
             patience += 1
-        if epoch >= 20 and patience >= 5:
+        if phase_epoch >= 20 and patience >= 5:
             break
     verify_frozen(model, frozen)
     if best is None:
-        write_json(out / "formal_gate.json", {"passed": False, "reason": "no checkpoint achieved dev GT IoU .75"})
+        write_json(out / "formal_gate.json", {
+            **(best_observed or development_gate(None, None, args.dev_gate_iou, False)),
+            "passed": False, "reason": "no checkpoint achieved the configured development GT IoU",
+        })
         return
     chosen = torch.load(out / "best_mask.pt", map_location=args.device, weights_only=True)
     model.load_state_dict(chosen["model"], strict=True)
-    risk = {k: evaluate_mask(model, dev[k], args.device, car_class)["crop_grid"]["car"]
+    selection = chosen["mask_only"]
+    gate = {key: selection[key] for key in development_gate(None, None, args.dev_gate_iou, False)}
+    risk = {k: evaluate_mask(model, dev[k], args.device, car_class, mask_threshold=args.mask_threshold)["crop_grid"]["car"]
             for k in ("paired_gt", "pred", "pred_gt_right")}
     write_json(out / "dev_crop_diagnostic.json", risk)
     gt_risk, pred_risk = (risk[k]["iou"] for k in ("paired_gt", "pred"))
     right_risk = risk["pred_gt_right"]["iou"]
     if (gt_risk is not None and pred_risk is not None and right_risk is not None
-            and gt_risk >= .75 and gt_risk - pred_risk > .10):
-        write_json(out / "formal_gate.json", {"passed": False, "reason": "dev crop gap requires mixed-training diagnosis",
+            and gt_risk >= args.dev_gate_iou and gt_risk - pred_risk > .10):
+        write_json(out / "formal_gate.json", {**gate, "passed": False, "reason": "dev crop gap requires mixed-training diagnosis",
                    "diagnostic": risk})
         return
-    gt = evaluate_mask(model, heldout["gt"], args.device, car_class, original=True, detail=True)
-    pred = evaluate_mask(model, heldout["pred"], args.device, car_class, original=True, detail=True)
+    gt = evaluate_mask(model, heldout["gt"], args.device, car_class, original=True, detail=True, mask_threshold=args.mask_threshold)
+    pred = evaluate_mask(model, heldout["pred"], args.device, car_class, original=True, detail=True,
+                         mask_threshold=args.mask_threshold)
     gt_primary, pred_primary = gt["crop_grid"]["car"], pred["crop_grid"]["car"]
-    accepted = (gt_primary["iou"] is not None and gt_primary["iou"] >= .75
+    heldout_passed = (gt_primary["iou"] is not None and gt_primary["iou"] >= .75
                 and all(pred_primary[key] is not None and pred_primary[key] >= goal
                         for key, goal in (("iou", .65), ("precision", .75), ("recall", .85))))
-    write_json(out / "formal_gate.json", {"passed": accepted, "checkpoint": chosen["mask_only"],
-                                         "gt_roi": gt, "pred_roi": pred})
-    if accepted:
+    accepted = gate["dev_gate_passed"] and heldout_passed
+    filename = ("foreground_ready.pt" if accepted
+                else "foreground_evaluation.pt" if args.allow_mask_gate_override else None)
+    write_json(out / "formal_gate.json", {**gate, "passed": accepted, "heldout_gate_passed": heldout_passed,
+                                         "checkpoint": selection, "export": filename, "gt_roi": gt, "pred_roi": pred})
+    if filename is not None:
         deploy = {key: value for key, value in chosen.items() if key != "optimizer"}
-        deploy["foreground_mask_raw_classes"] = [26]
-        temporary = out / "foreground_ready.pt.tmp"
+        deploy.pop("mask_evaluation", None)  # New exports store unfurled logits.
+        deploy.update(foreground_mask_raw_classes=[26], mask_threshold=args.mask_threshold,
+                      mask_gate={**gate, "heldout_gate_passed": heldout_passed, "evaluation_only": not accepted})
+        temporary = out / (filename + ".tmp")
         torch.save(deploy, temporary)
-        os.replace(temporary, out / "foreground_ready.pt")
+        os.replace(temporary, out / filename)
     print(f"formal gate: {accepted}", flush=True)
 
 
@@ -443,7 +515,8 @@ def main():
     if context:
         initialize_context(model, bundle, args.device)
     if args.stage == "formal":
-        report = json.loads((out / "overfit_gate.json").read_text())
+        gate_dir = args.resume_mask.parent if args.resume_mask is not None else out
+        report = json.loads((gate_dir / "overfit_gate.json").read_text())
         if not report["passed"] or report.get("mask_head", "light") != args.mask_head:
             raise RuntimeError("eight-frame prerequisite failed")
     else:
