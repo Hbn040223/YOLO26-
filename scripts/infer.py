@@ -43,7 +43,10 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
     config = bundle["config"]
     channels = config["adapter_channels"]
     encoder = LightStereoFeatureEncoder(build_lightstereo_backbone(openstereo_source), channels)
-    detector = StereoYOLO26PanHead(channels, len(bundle["class_mapping"]), one_to_one=config["one_to_one"])
+    detector = StereoYOLO26PanHead(
+        channels, len(bundle["class_mapping"]), one_to_one=config["one_to_one"],
+        one_to_one_only=config.get("one_to_one_only", False),
+    )
     instance = StereoLocalInstanceHead(
         channels, bundle["dmax_roi"], roi_sampling=config["roi_sampling"],
         mask_head_variant=config.get("mask_head_variant", "light"),

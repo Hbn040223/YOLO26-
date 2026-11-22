@@ -117,6 +117,20 @@ PYTHONPATH=src python scripts/infer.py \
 ```
 
 
+## One-to-one deployment checkpoint
+
+Export a smaller PyTorch checkpoint for inference:
+
+```bash
+python scripts/export_one_to_one.py \
+  --weights models/foreground_evaluation.pt \
+  --output outputs/foreground_evaluation_one_to_one.pt
+```
+
+Pass the result to the existing inference command using --weights. The loader reads the one_to_one_only flag, instantiates only the one-to-one prediction branch, and loads the state strictly. The export retains the neck, Mask, iDisp, thresholds, and foreground metadata. Keep the original checkpoint for training or resuming the dual-branch head. The evaluation-only gate status of the example checkpoint is preserved.
+
+Only the one-to-many tensors and any optimizer state are dropped. The original inference path already skips the one-to-many computation, so the benefit is a smaller checkpoint and lower parameter memory.
+
 ## Near-car evaluation
 
 The near-car validation cohort contains 23 annotated cars with calibrated GT foreground median depth below 10 m. Use score 0.40, top-K 500 and class-aware paired matching at bilateral IoU 0.50. Training validation defaults to score 0.40 and class-aware paired NMS IoU 0.70. Record threshold changes with --score-threshold and --validation-paired-nms-iou when comparing runs.
