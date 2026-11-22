@@ -57,6 +57,31 @@ class CarSupervisionRepairTest(unittest.TestCase):
             self.assertFalse(mask[4, 12])
             self.assertFalse(legacy.get("detection_ignore_mask") is not None)
 
+    def test_a1_visible_mode_preserves_thin_right_car_as_left_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            instance = np.zeros((16, 32), dtype=np.uint16)
+            instance[2:8, 2:16] = 1
+            instance[2:8, 20:28] = 2
+            disparity = np.zeros_like(instance)
+            disparity[2:8, 2:16] = 4 * 256
+            disparity[2:8, 20:28] = 256
+            ignore = np.zeros(instance.shape, dtype=np.uint8)
+            paths = tuple(root / name for name in ("l.png", "r.png", "inst.png", "disp.png", "ignore.png"))
+            for path, array in zip(paths, (ignore, ignore, instance, disparity, ignore)):
+                Image.fromarray(array).save(path)
+            anns = tuple(KittiManifestRecord("frame", *paths, 26, i, (0., 0., 1., 1.)) for i in (1, 2))
+            frame = KittiFrameRecord("frame", *paths, anns)
+            base = KittiFrameDataset([frame], {26: 0}, load_images=False)[0]
+            new = KittiFrameDataset([frame], {26: 0}, load_images=False, repair_car_supervision=True,
+                                    right_box_mode="visible_width8")[0]
+            self.assertEqual(base["boxes6"][:, 4:].tolist(), [[-2., 11.], [19., 26.]])
+            self.assertEqual(new["boxes6"][:, 4:].tolist(), [[0., 11.]])
+            self.assertEqual(new["detection_boxes6"].shape, (2, 6))
+            self.assertEqual(new["detection_boxes6"][1, 4:].tolist(), [23.5, 23.5])
+            self.assertEqual([r["instance_value"] for r in new["right_box_audit"]], [1, 2])
+            self.assertEqual([r["geometry"].pair_evaluable for r in new["right_box_audit"]], [True, False])
+
     def test_ignore_only_removes_background_and_left_only_gradient_stays_left(self):
         locations = torch.tensor([[4., 4., 8.], [12., 4., 8.], [20., 4., 8.]])
         left_only = torch.tensor([[2., 2., 7., 7., 4., 4.]])

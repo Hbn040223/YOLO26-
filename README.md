@@ -133,6 +133,10 @@ Only the one-to-many tensors and any optimizer state are dropped. The original i
 
 ## Near-car evaluation
 
+The original paired annotation mode is legacy. For a visible-right label audit, instantiate KittiFrameDataset with right_box_mode="visible_width8". This mode uses valid left disparity pixels that project inside the actual right image and exposes raw/visible geometry in right_box_audit. The 20% support flag is diagnostic. With repair_car_supervision=True, Car instances without a visible right width of at least 8 px remain in detection_boxes6 as left-only targets. Evaluate changes beside the historical cohort and report the eligible denominator.
+
+
+
 The near-car validation cohort contains 23 annotated cars with calibrated GT foreground median depth below 10 m. Use score 0.40, top-K 500 and class-aware paired matching at bilateral IoU 0.50. Training validation defaults to score 0.40 and class-aware paired NMS IoU 0.70. Record threshold changes with --score-threshold and --validation-paired-nms-iou when comparing runs.
 
 | Paired NMS IoU | Near cars matched | Extra qualifying pairs assigned to a near car | Near cars with extra pairs |
