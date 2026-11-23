@@ -7,6 +7,7 @@ from .local_disparity import RegularizedIDispHead, RoiDisparity
 from .mask import ContextInstanceMaskHead, LightInstanceMaskHead, foreground_disparity_validity
 from .roi import ROI_SAMPLING_MODES, CropMetadata, LeftRoIAlign, StereoRoIAlign, align_mask_spatial_valid, make_pair_crop_windows, sample_roi_feature
 from .local_aggregation import AttentionPyramid
+from .roi_selection import RoiPairSelection, select_roi_pairs, subset_pairs, subset_crop, project_foreground, keep_foreground_pairs, _iou
 from .geometry import generate_point_locations, point_levels
 from .detection import StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions, generate_grid_anchors
 
@@ -61,6 +62,31 @@ class StereoLocalInstanceHead(nn.Module):
         left_roi, spatial_valid = sample_roi_feature(features, crop.c_l, crop, self.roi.stride)
         return left_roi, align_mask_spatial_valid(spatial_valid), crop
 
+    def forward_selected(self, pyramid, pairs, image_height, image_width, mask_threshold):
+        """Reuse Mask and P2-left RoIs; build disparity only for kept pairs."""
+        count = len(pairs.indices)
+        hw = (image_height, image_width)
+        if count < 2 or not bool((_iou(pairs.boxes6[:, :4], pairs.boxes6[:, :4]) >= .35).triu(1).any()):
+            roi = type("RoiPyramid", (), {n:getattr(pyramid,n).expand(count,-1,-1,-1)
+                for n in ("p2_left","p2_right","p3_left","p4_left")})()
+            return pairs, self(roi, pairs.boxes6, *hw)
+        crop = make_pair_crop_windows(pairs.boxes6, *hw, 16., roi_sampling=self.roi_sampling)
+        left, spatial = sample_roi_feature(pyramid.p2_left.expand(count,-1,-1,-1), crop.c_l, crop, 4)
+        logits = self.mask(left)
+        mask_validity = align_mask_spatial_valid(spatial)
+        masks = project_foreground(logits, mask_validity, crop, hw, mask_threshold)
+        keep = keep_foreground_pairs(pairs, masks)
+        pairs = subset_pairs(pairs, keep)
+        crop = subset_crop(crop, keep)
+        left, spatial = left[keep], spatial[keep]
+        count = len(keep)
+        right, _ = sample_roi_feature(pyramid.p2_right.expand(count,-1,-1,-1), crop.c_r, crop, 4)
+        p3, _ = self.p3_roi(pyramid.p3_left.expand(count,-1,-1,-1), crop)
+        p4, _ = self.p4_roi(pyramid.p4_left.expand(count,-1,-1,-1), crop)
+        disparity = self.idisp(left, right, AttentionPyramid(left,p3,p4), crop, spatial)
+        return pairs, InstanceDisparityOutput(logits[keep],mask_validity[keep],disparity.absolute,
+            disparity.valid,disparity.peak,disparity.entropy,crop)
+
     def forward_disparity(
         self, pyramid: object, boxes6: Tensor, image_height: int, image_width: int, margin: float = 16.
     ) -> tuple[RoiDisparity, CropMetadata]:
@@ -106,7 +132,7 @@ class StereoYoloLocalModel(nn.Module):
         score_threshold: float = .40, pre_nms_topk: int = 500, detector_variant: str = "baseline", *,
         right_offset_mode: str = "legacy_clamp", apply_paired_nms: bool | None = None,
         paired_nms_iou: float = .5, foreground_class_indices: tuple[int, ...] = (),
-        mask_threshold: float = .50,
+        mask_threshold: float = .50, roi_selection: RoiPairSelection | None = None,
     ) -> None:
         super().__init__()
         self.encoder, self.detector, self.instance_head, self.score_threshold, self.pre_nms_topk, self.detector_variant = encoder, detector, instance_head, score_threshold, pre_nms_topk, detector_variant
@@ -123,6 +149,14 @@ class StereoYoloLocalModel(nn.Module):
         if not 0 < mask_threshold < 1:
             raise ValueError("mask threshold must be strictly between zero and one")
         self.mask_threshold = mask_threshold
+        if roi_selection is not None:
+            if detector_variant != "stereo_yolo26_pan" or instance_head.roi_sampling != "fixed_56":
+                raise ValueError("near selection requires the PAN detector and fixed_56 RoIs")
+            if score_threshold != .40 or pre_nms_topk != 500 or paired_nms_iou != .50 or apply_paired_nms is not True:
+                raise ValueError("near selector requires score=.40, topk=500 and explicit paired NMS=.50")
+            if roi_selection.car_class not in foreground_class_indices:
+                raise ValueError("near selection requires trained Car foreground")
+        self.roi_selection = roi_selection
 
     def forward(self, left: Tensor, right: Tensor) -> StereoYoloLocalOutput:
         if left.shape[0] != 1:
@@ -152,6 +186,10 @@ class StereoYoloLocalModel(nn.Module):
             )
         else:
             raise ValueError("unsupported detector_variant")
+        if self.roi_selection is not None:
+            pair = select_roi_pairs(pair,
+                {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
+                locations, left.shape[-2:], self.roi_selection, self.right_offset_mode)
         if pair.boxes6.numel() == 0:
             empty = left.new_empty((0,))
             empty_ids = left.new_empty((0,), dtype=torch.long)
@@ -167,7 +205,11 @@ class StereoYoloLocalModel(nn.Module):
         # RoI branches expect one feature item per candidate; repeat only feature maps, not the encoder.
         count = pair.boxes6.shape[0]
         roi_pyramid = type("RoiPyramid", (), {name: getattr(pyramid, name).expand(count, -1, -1, -1) for name in ("p2_left", "p2_right", "p3_left", "p4_left")})()
-        instance = self.instance_head(roi_pyramid, pair.boxes6, left.shape[-2], left.shape[-1])
+        if self.roi_selection is None:
+            instance = self.instance_head(roi_pyramid, pair.boxes6, left.shape[-2], left.shape[-1])
+        else:
+            pair, instance = self.instance_head.forward_selected(
+                pyramid, pair, left.shape[-2], left.shape[-1], self.mask_threshold)
         boxes_left = pair.boxes6[:, :4]
         boxes_right = torch.stack((pair.boxes6[:, 4], pair.boxes6[:, 1], pair.boxes6[:, 5], pair.boxes6[:, 3]), 1)
         foreground = torch.zeros_like(instance.validity)

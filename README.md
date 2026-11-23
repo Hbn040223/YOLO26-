@@ -157,3 +157,28 @@ Each qualifying pair is assigned to its highest bilateral-IoU Car GT before coun
 The common foreground contains 252,150 valid GT foreground pixels covered by all three settings. These are near-car validation measurements, conditional on detection for EPE and D1. The <10 m cohort is selected by GT for measurement. The inference model still processes all retained pairs.
 
 See the [matrix NMS benchmark](docs/paired_nms_e20_validation.md#batched-nms-retest--same-e20-checkpoint) for updated latency.
+
+### Experimental near-Car foreground selection
+
+Pass `--roi-max-distance 15 --bf-px-m <fB> --cx-delta-px <cx_left-cx_right>`
+together with `--score .40 --paired-nms --paired-nms-iou .50`.
+The calibration arguments must describe the input stereo pair in pixel/metre units.
+This option requires the fixed-56 foreground-capable PAN bundle and keeps Car only.
+It is disabled by default.
+
+The selector retains coarse 15 m Car pairs and reserves at most one low-score
+same-edge pair within 12 m. Overlapping pairs use the existing Mask head before
+disparity. Left-box IoU >= .35 and foreground IoU >= .45 define conflicts.
+Greedy priority is foreground area times square root of detection score.
+Surviving candidates reuse Mask logits and left P2 crops. Right P2 sampling,
+left P3/P4 conditioning and local disparity run only for survivors.
+
+On the repeatedly used 40-frame development split, the integrated path retained
+48 pairs versus 530 in the release baseline. Near paired recall was 20/23 versus
+19/23, foreground-usable targets 17/23 versus 16/23, and qualified duplicate
+near pairs 0 versus 4. The 20 matched near targets retained identical dense IDs.
+All retained Car pairs had precision 38/48 (79.17%). Independent validation and
+the 80% precision gate remain pending. Inputs already on GPU, alternating
+three trials per frame on shared RTX 6000 Ada gave model P95 29.93 ms versus
+74.13 ms for release and 27.63 ms for near selection without foreground dedup.
+These measurements exclude image loading, preprocessing and transfer.
