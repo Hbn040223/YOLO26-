@@ -7,7 +7,7 @@ from .local_disparity import RegularizedIDispHead, RoiDisparity
 from .mask import ContextInstanceMaskHead, LightInstanceMaskHead, foreground_disparity_validity
 from .roi import ROI_SAMPLING_MODES, CropMetadata, LeftRoIAlign, StereoRoIAlign, align_mask_spatial_valid, make_pair_crop_windows, sample_roi_feature
 from .local_aggregation import AttentionPyramid
-from .roi_selection import RoiPairSelection, select_roi_pairs, subset_pairs, subset_crop, project_foreground, keep_foreground_pairs, _iou
+from .roi_selection import LeftOnlyDetections, RoiPairSelection, select_roi_pairs, subset_pairs, subset_crop, project_foreground, keep_foreground_pairs, _iou
 from .geometry import generate_point_locations, point_levels
 from .detection import StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions, generate_grid_anchors
 
@@ -122,6 +122,7 @@ class StereoYoloLocalOutput:
     validity: Tensor
     peak: Tensor
     entropy: Tensor
+    left_only: LeftOnlyDetections | None = None
 
 
 class StereoYoloLocalModel(nn.Module):
@@ -186,8 +187,9 @@ class StereoYoloLocalModel(nn.Module):
             )
         else:
             raise ValueError("unsupported detector_variant")
+        left_only = None
         if self.roi_selection is not None:
-            pair = select_roi_pairs(pair,
+            pair, left_only = select_roi_pairs(pair,
                 {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
                 locations, left.shape[-2:], self.roi_selection, self.right_offset_mode)
         if pair.boxes6.numel() == 0:
@@ -200,7 +202,7 @@ class StereoYoloLocalModel(nn.Module):
                 pair_ids=empty_ids, foreground_validity=empty_valid, boxes_left=empty_boxes, boxes_right=empty_boxes,
                 scores=empty, classes=empty_ids, mask_logits=left.new_empty((0, 1, 28, 28)),
                 mask_validity=left.new_empty((0, 1, 28, 28), dtype=torch.bool), disparity=empty_disparity,
-                validity=empty_valid, peak=empty_disparity, entropy=empty_disparity,
+                validity=empty_valid, peak=empty_disparity, entropy=empty_disparity, left_only=left_only,
             )
         # RoI branches expect one feature item per candidate; repeat only feature maps, not the encoder.
         count = pair.boxes6.shape[0]
@@ -224,5 +226,5 @@ class StereoYoloLocalModel(nn.Module):
             pair_ids=pair.indices, foreground_validity=foreground, boxes_left=boxes_left, boxes_right=boxes_right,
             scores=pair.scores, classes=pair.classes, mask_logits=instance.mask_logits,
             mask_validity=instance.mask_validity, disparity=instance.disparity, validity=instance.validity,
-            peak=instance.peak, entropy=instance.entropy,
+            peak=instance.peak, entropy=instance.entropy, left_only=left_only,
         )

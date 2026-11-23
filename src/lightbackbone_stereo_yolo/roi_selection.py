@@ -6,7 +6,7 @@ import math
 import numpy as np
 import torch
 
-from .detection import PairDetections, _iou, anchorfree_prediction_scores
+from .detection import PairDetections, _iou, anchorfree_candidate_indices, anchorfree_prediction_scores
 from .geometry import decode_anchorfree_boxes6, pair_boxes_to_lr
 from .idisp_ab import project_disparity
 
@@ -31,6 +31,17 @@ class RoiPairSelection:
             raise ValueError("reserve score must be positive and below .40")
 
 
+@dataclass(frozen=True)
+class LeftOnlyDetections:
+    """Left-view candidates without usable stereo geometry."""
+
+    boxes: torch.Tensor
+    scores: torch.Tensor
+    ids: torch.Tensor
+    classes: torch.Tensor
+    distance_m: torch.Tensor
+
+
 def subset_pairs(pairs, selected):
     return PairDetections(pairs.boxes6[selected],pairs.scores[selected],pairs.indices[selected],
                           pairs.classes[selected])
@@ -41,10 +52,12 @@ def subset_crop(crop, indices):
                            if isinstance(getattr(crop,f.name),torch.Tensor)})
 
 
-def _depth(boxes, config):
+def _depth(boxes, config, image_hw):
     disparity=.5*(boxes[:,0]+boxes[:,2]-boxes[:,4]-boxes[:,5])-config.cx_delta_px
-    valid=(torch.isfinite(boxes).all(1)&(disparity>0)&(boxes[:,2]>boxes[:,0])
-           &(boxes[:,3]>boxes[:,1])&(boxes[:,5]>boxes[:,4]))
+    height, width = image_hw
+    valid=(torch.isfinite(boxes).all(1)&torch.isfinite(disparity)&(disparity>0)&(boxes[:,2]>boxes[:,0])
+           &(boxes[:,3]>boxes[:,1])&(boxes[:,5]>boxes[:,4])
+           &(boxes[:,5]>0)&(boxes[:,4]<width)&(boxes[:,3]>0)&(boxes[:,1]<height))
     depth=torch.where(valid,config.bf_px_m/disparity,torch.full_like(disparity,float("inf")))
     return disparity,depth
 
@@ -60,9 +73,30 @@ def _greedy(conflicts, priority, scores):
     return chosen
 
 
+def _select_left_only(boxes, depth, scores, classes, supported_boxes, image_hw, car_class):
+    _, chosen = anchorfree_candidate_indices(scores, .40, 500)
+    ids = chosen[(classes[chosen] == car_class) & ~torch.isfinite(depth[chosen])]
+    raw_left = boxes[ids, :4]
+    height, width = image_hw
+    limit = raw_left.new_tensor((width, height, width, height))
+    clipped = raw_left.clamp_min(0).minimum(limit)
+    usable = torch.isfinite(raw_left).all(1) & (clipped[:, 2:] > clipped[:, :2]).all(1)
+    ids, clipped = ids[usable], clipped[usable]
+    if len(ids) and len(supported_boxes):
+        covered = (_iou(clipped, supported_boxes.clamp_min(0).minimum(limit)) >= .50).any(1)
+        ids, clipped = ids[~covered], clipped[~covered]
+    if len(ids) > 1:
+        overlap = _iou(clipped, clipped).cpu().numpy() >= .50
+        order = _greedy(overlap, scores[ids].cpu().numpy(), scores[ids].cpu().numpy())
+        ids, clipped = ids[order], clipped[order]
+    return LeftOnlyDetections(clipped, scores[ids], ids, classes[ids],
+                              scores.new_full((len(ids),), float("nan")))
+
+
 def select_roi_pairs(pairs, predictions, locations, image_hw, config, right_offset_mode):
-    """Apply the locked 15 m near path and at most one 12 m edge reserve."""
-    d,z=_depth(pairs.boxes6,config)
+    """Return near stereo pairs and separate left observations with unknown distance."""
+    d,z=_depth(pairs.boxes6,config,image_hw)
+    supported_boxes = pairs.boxes6[(pairs.classes == config.car_class) & torch.isfinite(z), :4]
     admitted=(pairs.classes==config.car_class)&(z<=config.max_distance_m)
     pairs=subset_pairs(pairs,admitted)
     d=d[admitted]
@@ -78,7 +112,7 @@ def select_roi_pairs(pairs, predictions, locations, image_hw, config, right_offs
     scores,classes=anchorfree_prediction_scores(predictions)
     boxes=decode_anchorfree_boxes6(predictions["box6"].reshape(-1,6),locations,
                                   right_offset_mode=right_offset_mode)
-    disp,depth=_depth(boxes,config)
+    disp,depth=_depth(boxes,config,image_hw)
     left,right=pair_boxes_to_lr(boxes)
     height,width=image_hw
     limit=boxes.new_tensor([width-1,height-1])
@@ -94,6 +128,8 @@ def select_roi_pairs(pairs, predictions, locations, image_hw, config, right_offs
         same_depth=(disp[:,None]-d).abs()<=torch.maximum(
             torch.full_like(joint,2.),.10*torch.minimum(disp[:,None],d))
         eligible&=~((joint>.35)&same_depth).any(1)
+    if not len(scores):
+        return pairs, _select_left_only(boxes, depth, scores, classes, supported_boxes, image_hw, config.car_class)
     area_rank=visible_area.masked_fill(~eligible,-1)
     biggest=eligible&(area_rank==area_rank.max())
     winner=scores.masked_fill(~biggest,-1).argmax().reshape(1)
@@ -101,11 +137,15 @@ def select_roi_pairs(pairs, predictions, locations, image_hw, config, right_offs
     if len(pairs.indices):
         accepted&=~(joint[winner]>=.65).any(1)
     index=torch.where(accepted,winner,-1).item()
-    if index<0:
-        return pairs
-    ix=slice(index,index+1)
-    return PairDetections(torch.cat((pairs.boxes6,boxes[ix])),torch.cat((pairs.scores,scores[ix])),
-        torch.cat((pairs.indices,pairs.indices.new_tensor([index]))),torch.cat((pairs.classes,classes[ix])))
+    if index >= 0:
+        ix = slice(index, index + 1)
+        pairs = PairDetections(
+            torch.cat((pairs.boxes6, boxes[ix])), torch.cat((pairs.scores, scores[ix])),
+            torch.cat((pairs.indices, pairs.indices.new_tensor([index]))), torch.cat((pairs.classes, classes[ix])),
+        )
+        supported_boxes = torch.cat((supported_boxes, boxes[ix, :4]))
+    left_only = _select_left_only(boxes, depth, scores, classes, supported_boxes, image_hw, config.car_class)
+    return pairs, left_only
 
 
 def project_foreground(logits, validity, crop, image_hw, mask_threshold):

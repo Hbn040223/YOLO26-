@@ -182,3 +182,10 @@ the 80% precision gate remain pending. Inputs already on GPU, alternating
 three trials per frame on shared RTX 6000 Ada gave model P95 29.93 ms versus
 74.13 ms for release and 27.63 ms for near selection without foreground dedup.
 These measurements exclude image loading, preprocessing and transfer.
+
+When near selection is enabled, high-score Car candidates with a usable left
+box and invalid stereo geometry can be returned as left-only observations.
+The NPZ stores them separately as `left_only_boxes`, `left_only_scores`,
+`left_only_ids`, `left_only_classes`, and `left_only_distance_m` (NaN for
+unknown distance). These rows use the detector's dense IDs and bypass local
+disparity. Known far pairs remain outside the near disparity budget.

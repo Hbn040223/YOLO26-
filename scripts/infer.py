@@ -113,6 +113,14 @@ def main() -> None:
                 "boxes_left", "boxes_right", "scores", "classes", "disparity", "validity", "mask_validity",
                 "pair_ids", "foreground_validity",
             )}
+            if result.left_only is not None:
+                arrays.update({
+                    "left_only_boxes": result.left_only.boxes.cpu().numpy(),
+                    "left_only_scores": result.left_only.scores.cpu().numpy(),
+                    "left_only_ids": result.left_only.ids.cpu().numpy(),
+                    "left_only_classes": result.left_only.classes.cpu().numpy(),
+                    "left_only_distance_m": result.left_only.distance_m.cpu().numpy(),
+                })
             arrays["roi_selection_enabled"] = np.asarray(model.roi_selection is not None)
             arrays["mask_probability"] = result.mask_logits.sigmoid().cpu().numpy()
             arrays["foreground_disparity"] = result.disparity.masked_fill(
@@ -130,6 +138,8 @@ def main() -> None:
     with args.output.open("wb") as handle:
         np.savez_compressed(handle, **arrays)
     print(f"{len(result.scores)} paired detections, disparity shape {tuple(result.disparity.shape)}")
+    if result.left_only is not None:
+        print(f"{len(result.left_only.ids)} left-only detections with unknown distance")
     print(args.output)
 
 
