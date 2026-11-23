@@ -1,5 +1,8 @@
 """Lightweight left-view instance-mask branch."""
 from __future__ import annotations
+
+import math
+
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -18,7 +21,73 @@ class LightInstanceMaskHead(nn.Module):
         return F.interpolate(self.layers(left_roi), size=(28, 28), mode="bilinear", align_corners=False)
 
 
-def mask_loss(mask_logits: Tensor, target_mask: Tensor, valid: Tensor) -> Tensor:
-    per_pixel = F.binary_cross_entropy_with_logits(mask_logits, target_mask, reduction="none")
+
+class ContextInstanceMaskHead(nn.Module):
+    """Fuse a wider view of the existing left crop with its spatial detail."""
+    def __init__(self, in_channels: int) -> None:
+        super().__init__()
+        self.detail = self._block(in_channels, 24)
+        self.half_grid = self._block(24, 32, 2)
+        self.quarter_grid = self._block(32, 48, 2)
+        self.context = self._block(48, 48)
+        self.decode_half = self._block(48 + 32, 32)
+        self.decode_full = self._block(32 + 24, 24)
+        self.logits = nn.Conv2d(24, 1, 1)
+
+    @staticmethod
+    def _block(in_channels: int, out_channels: int, stride: int = 1) -> nn.Sequential:
+        return nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, 3, stride=stride, padding=1, bias=False),
+            nn.GroupNorm(8, out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, left_roi: Tensor) -> Tensor:
+        detail = self.detail(F.avg_pool2d(left_roi, 2))
+        half = self.half_grid(detail)
+        coarse = self.context(self.quarter_grid(half))
+        coarse = F.interpolate(coarse, size=half.shape[-2:], mode="bilinear", align_corners=False)
+        decoded = self.decode_half(torch.cat((coarse, half), dim=1))
+        decoded = F.interpolate(decoded, size=detail.shape[-2:], mode="bilinear", align_corners=False)
+        return self.logits(self.decode_full(torch.cat((decoded, detail), dim=1)))
+
+
+def mask_loss(mask_logits: Tensor, target_mask: Tensor, valid: Tensor, *,
+              pos_weight: Tensor | None = None, dice_weight: float = 0.) -> Tensor:
+    if not math.isfinite(dice_weight) or dice_weight < 0:
+        raise ValueError("dice_weight must be finite and nonnegative")
+    per_pixel = F.binary_cross_entropy_with_logits(
+        mask_logits, target_mask, reduction="none", pos_weight=pos_weight,
+    )
     weighted = per_pixel * valid.to(per_pixel.dtype)
-    return weighted.sum() / valid.sum().clamp_min(1)
+    if not dice_weight:
+        return weighted.sum() / valid.sum().clamp_min(1)
+    spatial = valid.flatten(1)
+    pixel_count = spatial.sum(1)
+    bce = weighted.flatten(1).sum(1) / pixel_count.clamp_min(1)
+    probability = mask_logits.sigmoid().flatten(1) * spatial
+    truth = target_mask.flatten(1) * spatial
+    dice = 1 - (2 * (probability * truth).sum(1) + 1) / (probability.sum(1) + truth.sum(1) + 1)
+    present = pixel_count > 0
+    return ((bce + dice_weight * dice) * present).sum() / present.sum().clamp_min(1)
+
+
+def mask_logit_cutoff(mask_threshold: float) -> float:
+    if not 0 < mask_threshold < 1:
+        raise ValueError("mask threshold must be strictly between zero and one")
+    return math.log(mask_threshold / (1 - mask_threshold))
+
+
+
+def foreground_disparity_validity(
+    mask_logits: Tensor, mask_validity: Tensor, disparity: Tensor,
+    disparity_validity: Tensor, supported: Tensor, *, mask_threshold: float = .50,
+) -> Tensor:
+    """Return instance foreground validity on the deployed disparity grid."""
+    # Apply the cutoff before resizing to preserve logit-bias calibration.
+    calibrated = mask_logits - mask_logit_cutoff(mask_threshold)
+    probabilities = F.interpolate(calibrated.sigmoid(), size=disparity.shape[-2:],
+                                  mode="bilinear", align_corners=False)[:, 0]
+    spatial = F.interpolate(mask_validity.float(), size=disparity.shape[-2:], mode="nearest")[:, 0].bool()
+    return (supported[:, None, None] & (probabilities > .50)
+            & spatial & disparity_validity & torch.isfinite(disparity))

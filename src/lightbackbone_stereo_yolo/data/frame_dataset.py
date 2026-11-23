@@ -16,7 +16,9 @@ from PIL import Image
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from .kitti import KittiManifestRecord, build_kitti_manifest
+from .kitti import (
+    KittiManifestRecord, RightProjection, assess_right_projection, build_kitti_manifest, project_valid_right_box,
+)
 
 
 # LightStereo KITTI config: NormalizeImage MEAN/STD.  The pretrained backbone was
@@ -38,10 +40,12 @@ class KittiFrameRecord:
     annotations: tuple[KittiManifestRecord, ...]
 
 
-def build_frame_records(root: str | Path, annotation_json: str | Path) -> list[KittiFrameRecord]:
+def build_frame_records(
+    root: str | Path, annotation_json: str | Path, *, require_files: bool = False,
+) -> list[KittiFrameRecord]:
     """Group the validated per-instance manifest by frame without re-reading assets."""
     grouped: dict[str, list[KittiManifestRecord]] = {}
-    for record in build_kitti_manifest(root, annotation_json):
+    for record in build_kitti_manifest(root, annotation_json, require_files=require_files):
         grouped.setdefault(record.frame_id, []).append(record)
     frames: list[KittiFrameRecord] = []
     for frame_id in sorted(grouped):
@@ -76,15 +80,22 @@ def normalized_rgb(path: Path, mean: tuple[float, float, float], std: tuple[floa
     return (image - mean_tensor) / std_tensor
 
 
-def _paired_boxes(mask: Tensor, valid: Tensor, disparity: Tensor) -> Tensor | None:
-    """Left mask box plus the right box projected by valid disparity."""
-    if not valid.any():
-        return None
+def _paired_boxes(
+    mask: Tensor, valid: Tensor, disparity: Tensor, projection: RightProjection | None = None,
+) -> Tensor | None:
+    """Left mask box plus the corresponding right projection."""
+    if projection is not None:
+        if not projection.pair_evaluable:
+            return None
+        right = projection.visible_box
+        assert right is not None
+    else:
+        right = project_valid_right_box(disparity, valid)
+        if right is None:
+            return None
     y, x = mask.nonzero(as_tuple=True)
     left = torch.stack((x.min(), y.min(), x.max(), y.max())).to(disparity.dtype)
-    vy, vx = valid.nonzero(as_tuple=True)
-    right_x = vx.to(disparity.dtype) - disparity[valid]
-    return torch.cat((left, torch.stack((right_x.min(), right_x.max()))))
+    return torch.cat((left, right[[0, 2]]))
 
 
 class KittiFrameDataset(Dataset):
@@ -100,6 +111,7 @@ class KittiFrameDataset(Dataset):
         load_images: bool = True,
         *,
         repair_car_supervision: bool = False,
+        right_box_mode: str = "legacy",
     ) -> None:
         if unknown_class not in ("error", "skip"):
             raise ValueError("unknown_class must be 'error' or 'skip'")
@@ -112,6 +124,9 @@ class KittiFrameDataset(Dataset):
         self.unknown_class = unknown_class
         self.load_images = load_images
         self.repair_car_supervision = repair_car_supervision
+        if right_box_mode not in ("legacy", "visible_width8"):
+            raise ValueError("right_box_mode must be legacy or visible_width8")
+        self.right_box_mode = right_box_mode
         if repair_car_supervision and 26 not in self.class_mapping:
             raise ValueError("car supervision repair requires KITTI category 26")
 
@@ -124,6 +139,12 @@ class KittiFrameDataset(Dataset):
         disparity = torch.from_numpy(np.asarray(Image.open(record.disparity), dtype=np.float32)) / 256.
         ignore = torch.from_numpy(np.asarray(Image.open(record.ignore_mask), dtype=np.uint8) > 0)
         disparity_valid_image = torch.isfinite(disparity) & (disparity > 0) & ~ignore
+
+        right_hw = None
+        right_box_audit = []
+        if self.right_box_mode == "visible_width8":
+            with Image.open(record.right_image) as image:
+                right_hw = (image.height, image.width)
 
         boxes: list[Tensor] = []
         masks: list[Tensor] = []
@@ -140,7 +161,13 @@ class KittiFrameDataset(Dataset):
                 raise ValueError(f"{record.frame_id}: unseen category_id {annotation.category_id}")
             mask = instance == annotation.instance_value
             valid = mask & disparity_valid_image
-            boxes6 = _paired_boxes(mask, valid, disparity)
+            projection = None
+            if right_hw is not None:
+                projection = assess_right_projection(mask, disparity, disparity_valid_image, right_hw)
+                right_box_audit.append({"instance_value": annotation.instance_value,
+                                        "category_id": annotation.category_id,
+                                        "geometry": projection})
+            boxes6 = _paired_boxes(mask, valid, disparity, projection)
             if detection_ignore is not None:
                 if boxes6 is None:
                     y, x = mask.nonzero(as_tuple=True)
@@ -186,6 +213,8 @@ class KittiFrameDataset(Dataset):
             sample["detection_boxes6"] = torch.stack(detection_boxes) if detection_boxes else disparity.new_empty((0, 6))
             sample["detection_classes"] = torch.full((len(detection_boxes),), self.class_mapping[26], dtype=torch.long)
             sample["detection_ignore_mask"] = detection_ignore
+        if right_hw is not None:
+            sample["right_box_audit"] = right_box_audit
         if self.load_images:
             sample["left"] = normalized_rgb(record.left_image, self.mean, self.std)
             sample["right"] = normalized_rgb(record.right_image, self.mean, self.std)

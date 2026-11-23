@@ -31,7 +31,38 @@ class KittiInstanceTarget:
     category_id: int
 
 
-def build_kitti_manifest(root: str | Path, annotation_json: str | Path) -> list[KittiManifestRecord]:
+@dataclass(frozen=True)
+class RightProjection:
+    raw_box: Tensor | None
+    visible_box: Tensor | None
+    mask_pixels: int
+    valid_pixels: int
+    visible_pixels: int
+
+    @property
+    def visible_width(self) -> float:
+        return float(self.visible_box[2] - self.visible_box[0]) if self.visible_box is not None else 0.
+
+    @property
+    def partly_outside(self) -> bool:
+        return 0 < self.visible_pixels < self.valid_pixels
+
+    @property
+    def fully_outside(self) -> bool:
+        return self.valid_pixels > 0 and self.visible_pixels == 0
+
+    @property
+    def low_support(self) -> bool:
+        return self.visible_pixels < .20 * self.mask_pixels
+
+    @property
+    def pair_evaluable(self) -> bool:
+        return self.visible_width >= 8.
+
+
+def build_kitti_manifest(
+    root: str | Path, annotation_json: str | Path, *, require_files: bool = False,
+) -> list[KittiManifestRecord]:
     """Validate supplied COCO-style RPN split records against KITTI2015 assets."""
     root = Path(root)
     payload = json.loads(Path(annotation_json).read_text())
@@ -42,32 +73,82 @@ def build_kitti_manifest(root: str | Path, annotation_json: str | Path) -> list[
         left = root / image["file_name"]
         stem = left.stem
         paths = (left, root / "training/image_3" / left.name, root / "training/instance" / left.name, root / "training/disp_occ_0" / left.name, root / image["ignore_mask_file"])
-        if not all(path.is_file() for path in paths):
+        missing = [path for path in paths if not path.is_file()]
+        if missing:
+            if require_files:
+                raise FileNotFoundError(f"{stem}: missing KITTI assets: {', '.join(map(str, missing))}")
             continue
         x, y, width, height = annotation["bbox"]
         records.append(KittiManifestRecord(stem, *paths, int(annotation["category_id"]), int(annotation["source_instance_value"]), (float(x), float(y), float(x + width), float(y + height))))
     return records
 
 
-def project_right_box(left_instance_mask: Tensor, disparity: Tensor) -> Tensor:
-    """Tight right box of valid left-instance pixels under xR=xL-Df."""
-    valid = left_instance_mask.bool() & torch.isfinite(disparity) & (disparity > 0)
-    if not valid.any():
-        raise ValueError("instance has no valid disparity pixels for right-box projection")
+def _projected_pixels(disparity: Tensor, valid: Tensor) -> tuple[Tensor, Tensor]:
     y, x = valid.nonzero(as_tuple=True)
-    right_x = x.to(disparity.dtype) - disparity[valid]
-    return torch.stack((right_x.min(), y.min().to(disparity.dtype), right_x.max(), y.max().to(disparity.dtype)))
+    return x.to(disparity.dtype) - disparity[valid], y.to(disparity.dtype)
 
 
-def build_instance_target(instance_map: Tensor, disparity: Tensor, instance_value: int, category_id: int) -> KittiInstanceTarget:
-    """Create a trainable paired-box target; invalid geometry is rejected."""
+def _projected_box(right_x: Tensor, y: Tensor) -> Tensor | None:
+    if right_x.numel() == 0:
+        return None
+    return torch.stack((right_x.min(), y.min(), right_x.max(), y.max()))
+
+
+def project_valid_right_box(disparity: Tensor, valid: Tensor) -> Tensor | None:
+    """Project the already validated pixels supplied by the frame loader."""
+    return _projected_box(*_projected_pixels(disparity, valid))
+
+
+def assess_right_projection(
+    mask: Tensor, disparity: Tensor, disparity_valid: Tensor, right_hw: tuple[int, int],
+) -> RightProjection:
+    """Audit the raw and visible parts of the KITTI projection on pixel centers."""
+    if mask.ndim != 2 or mask.shape != disparity.shape or disparity_valid.shape != mask.shape:
+        raise ValueError("projection mask, disparity and validity must be aligned 2D grids")
+    height, width = right_hw
+    if min(height, width) <= 0:
+        raise ValueError("right image must have positive height and width")
+    valid = mask.bool() & disparity_valid.bool() & torch.isfinite(disparity) & (disparity > 0)
+    xr, y = _projected_pixels(disparity, valid)
+    visible = (xr >= 0) & (xr <= width - 1) & (y >= 0) & (y <= height - 1)
+    return RightProjection(
+        _projected_box(xr, y), _projected_box(xr[visible], y[visible]),
+        int(mask.bool().sum()), xr.numel(), int(visible.sum()),
+    )
+
+
+def project_right_box(
+    left_instance_mask: Tensor, disparity: Tensor, *, disparity_valid: Tensor | None = None,
+    right_hw: tuple[int, int] | None = None,
+) -> Tensor:
+    """Project a KITTI box, optionally restricting it to the visible right image."""
+    valid = left_instance_mask.bool() & torch.isfinite(disparity) & (disparity > 0)
+    if disparity_valid is not None:
+        valid &= disparity_valid.bool()
+    if right_hw is None:
+        right = project_valid_right_box(disparity, valid)
+    else:
+        geometry = assess_right_projection(left_instance_mask, disparity, valid, right_hw)
+        if not geometry.pair_evaluable:
+            raise ValueError("projected right box is absent or narrower than 8 px")
+        right = geometry.visible_box
+    if right is None:
+        raise ValueError("instance has no valid disparity pixels for right-box projection")
+    return right
+
+
+def build_instance_target(
+    instance_map: Tensor, disparity: Tensor, instance_value: int, category_id: int,
+    *, right_hw: tuple[int, int] | None = None,
+) -> KittiInstanceTarget:
+    """Create a paired target. With right_hw, require a visible right box of at least 8 px."""
     mask = instance_map == instance_value
     valid_disparity = mask & torch.isfinite(disparity) & (disparity > 0)
     if not valid_disparity.any():
         raise ValueError("instance has no valid stereo disparity")
     y, x = mask.nonzero(as_tuple=True)
     left = torch.stack((x.min(), y.min(), x.max(), y.max())).to(disparity.dtype)
-    right = project_right_box(mask, disparity)
+    right = project_right_box(mask, disparity, disparity_valid=valid_disparity, right_hw=right_hw)
     boxes6 = torch.cat((left, right[[0, 2]]))
     return KittiInstanceTarget(boxes6, mask, valid_disparity, category_id)
 

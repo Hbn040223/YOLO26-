@@ -42,6 +42,43 @@ class KittiLabelContractTest(unittest.TestCase):
             self.assertEqual(record.left_box, (1., 2., 4., 6.))
             self.assertTrue(record.right_image.exists())
             self.assertEqual(record.instance_value, 9001)
+            record.right_image.unlink()
+            self.assertFalse(build_kitti_manifest(root, source))
+            with self.assertRaisesRegex(FileNotFoundError, "image_3"):
+                build_kitti_manifest(root, source, require_files=True)
+
+    def test_a1_visible_projection_controls_right_box_without_support_gate(self):
+        from lightbackbone_stereo_yolo.data.kitti import assess_right_projection
+
+        mask = torch.ones((4, 20), dtype=torch.bool)
+        disparity = torch.zeros(mask.shape)
+        disparity[1, [0, 2, 10, 19]] = torch.tensor([2., 1., 1., float("inf")])
+        valid = torch.ones_like(mask)
+        projection = assess_right_projection(mask, disparity, valid, (4, 20))
+        self.assertEqual(projection.raw_box.tolist(), [-2., 1., 9., 1.])
+        self.assertEqual(projection.visible_box.tolist(), [1., 1., 9., 1.])
+        self.assertEqual(projection.visible_width, 8.)
+        self.assertEqual(projection.valid_pixels, 3)
+        self.assertEqual(projection.visible_pixels, 2)
+        self.assertEqual(projection.mask_pixels, 80)
+        self.assertTrue(projection.partly_outside)
+        self.assertTrue(projection.pair_evaluable)
+        self.assertTrue(projection.low_support)
+        target = build_instance_target(mask.long(), disparity, 1, 26, right_hw=(4, 20))
+        self.assertEqual(target.boxes6[4:].tolist(), [1., 9.])
+
+        valid[1, 10] = False
+        self.assertFalse(assess_right_projection(mask, disparity, valid, (4, 20)).pair_evaluable)
+        empty = assess_right_projection(mask & False, disparity, valid, (4, 20))
+        self.assertIsNone(empty.raw_box)
+        self.assertIsNone(empty.visible_box)
+        self.assertFalse(empty.pair_evaluable)
+        # The only surviving positive disparity projects outside the image.
+        valid[1, 2] = False
+        outside = assess_right_projection(mask, disparity, valid, (4, 20))
+        self.assertTrue(outside.fully_outside)
+        self.assertFalse(outside.partly_outside)
+        self.assertIsNone(outside.visible_box)
 
     def test_right_box_uses_valid_left_instance_pixels_projected_by_disparity(self) -> None:
         self.assertIsNotNone(project_right_box)

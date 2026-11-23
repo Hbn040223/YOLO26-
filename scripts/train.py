@@ -119,7 +119,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--resume", default="")
     parser.add_argument("--preflight", action="store_true", help="one forward/backward/step with finite checks, then exit")
     parser.add_argument("--limit-train-batches", type=int, default=0)
-    parser.add_argument("--score-threshold", type=float, default=.05)
+    parser.add_argument("--score-threshold", type=float, default=.40)
+    parser.add_argument("--validation-paired-nms-iou", type=float, default=.70)
     parser.add_argument("--limit-val-batches", type=int, default=0)
     parser.add_argument("--log-interval", type=int, default=20)
     parser.add_argument("--seed", type=int, default=17)
@@ -133,6 +134,8 @@ def parse_args() -> argparse.Namespace:
         raise SystemExit("grad-clip and lr must be positive")
     if not 0 <= args.negative_iou < args.positive_iou <= 1:
         raise SystemExit("require 0 <= negative-iou < positive-iou <= 1")
+    if not (0 <= args.score_threshold <= 1 and 0 <= args.validation_paired_nms_iou <= 1):
+        parser.error("score threshold and validation paired-NMS IoU must be in [0, 1]")
     if args.roi_margin < 0:
         raise SystemExit("roi-margin must be non-negative")
     if min(args.det_weight, args.mask_weight, args.disp_weight) < 0:
@@ -266,7 +269,7 @@ def run_epoch(
     left_iou_total = 0.
     car_near_rows = []
     duplicate_predictions = 0
-    detector_metrics = {"target_count": 0., "raw_dense_left_hits": 0., "pre_nms_left_hits_score_001": 0., "deployment_left_hits_score_025": 0., "paired_hits_score_025": 0., "post_nms_pairs_score_025": 0.}
+    detector_metrics = {"target_count": 0., "raw_dense_left_hits": 0., "pre_nms_left_hits_score_001": 0., "deployment_left_hits": 0., "paired_hits": 0., "post_nms_pairs": 0.}
     metrics = {key: 0. for key in METRIC_KEYS}
     post_nms_pair_counts: list[float] = []
     detection_size_groups = {}
@@ -318,6 +321,8 @@ def run_epoch(
                 model.encoder, model.detector, batch["left"].to(args.device),
                 batch["right"].to(args.device), target,
                 right_offset_mode=getattr(args, "right_offset_mode", None) or "legacy_clamp",
+                score_threshold=getattr(args, "score_threshold", .40),
+                paired_nms_iou=getattr(args, "validation_paired_nms_iou", .70),
                 car_cohort=near_car,
             )
             for key, count in detector_result.get("car_deployment_score_040", {}).items():
@@ -326,7 +331,7 @@ def run_epoch(
                 {"frame_id": target["frame_id"], **row}
                 for row in detector_result.get("car_deployment_near_states", ())
             )
-            post_nms_pair_counts.append(float(detector_result["post_nms_pairs_score_025"]))
+            post_nms_pair_counts.append(float(detector_result["post_nms_pairs"]))
             duplicate_predictions += detector_result.get("paired_duplicate_predictions", 0)
             for key in detector_metrics:
                 detector_metrics[key] += float(detector_result[key])
@@ -340,6 +345,7 @@ def run_epoch(
                 batch["left"].to(args.device), batch["right"].to(args.device),
                 batch["targets"][0], args.dmax_roi, args.detector_variant,
                 score_threshold=args.score_threshold, roi_margin=args.roi_margin,
+                paired_nms_iou=getattr(args, "validation_paired_nms_iou", .70),
                 right_offset_mode=getattr(args, "right_offset_mode", None) or "legacy_clamp",
             )
             for key in pred_metrics:
@@ -368,12 +374,17 @@ def run_epoch(
     result["pred_d1"] = pred_metrics["d1_hit"] / pred_metrics["d1_count"] if pred_metrics["d1_count"] else 0.
     result["raw_dense_left_recall"] = detector_metrics["raw_dense_left_hits"] / detector_metrics["target_count"] if detector_metrics["target_count"] else 0.
     result["pre_nms_left_recall"] = detector_metrics["pre_nms_left_hits_score_001"] / detector_metrics["target_count"] if detector_metrics["target_count"] else 0.
-    result["deployment_left_recall"] = detector_metrics["deployment_left_hits_score_025"] / detector_metrics["target_count"] if detector_metrics["target_count"] else 0.
-    result["paired_coverage"] = detector_metrics["paired_hits_score_025"] / detector_metrics["target_count"] if detector_metrics["target_count"] else 0.
+    result["deployment_left_recall"] = detector_metrics["deployment_left_hits"] / detector_metrics["target_count"] if detector_metrics["target_count"] else 0.
+    result["paired_coverage"] = detector_metrics["paired_hits"] / detector_metrics["target_count"] if detector_metrics["target_count"] else 0.
     result["post_nms_pairs_p50"] = percentile(post_nms_pair_counts, .5) if post_nms_pair_counts else 0.
     result["post_nms_pairs_p90"] = percentile(post_nms_pair_counts, .9) if post_nms_pair_counts else 0.
-    result["paired_precision"] = detector_metrics["paired_hits_score_025"] / detector_metrics["post_nms_pairs_score_025"] if detector_metrics["post_nms_pairs_score_025"] else 0.
-    result["post_nms_pairs"] = detector_metrics["post_nms_pairs_score_025"]
+    result["paired_precision"] = detector_metrics["paired_hits"] / detector_metrics["post_nms_pairs"] if detector_metrics["post_nms_pairs"] else 0.
+    result["post_nms_pairs"] = detector_metrics["post_nms_pairs"]
+    if optimizer is None and collect_metrics and (getattr(args, "detector_metrics", False)
+                                                  or getattr(args, "pred_roi_metrics", False)):
+        result["validation_score_threshold"] = getattr(args, "score_threshold", .40)
+        result["validation_paired_nms_iou"] = getattr(args, "validation_paired_nms_iou", .70)
+        result["validation_class_aware"] = True
     result["paired_duplicate_predictions"] = duplicate_predictions
     if getattr(args, "one_to_one", False):
         result.update({key: value / frames for key, value in sparse_totals.items()})
@@ -609,10 +620,17 @@ def main() -> None:
         start_epoch = int(resume_payload["epoch"])
         best = float(resume_payload.get("best_val_loss", best))
         best_gt_roi_epe = float(resume_payload.get("best_gt_roi_epe", best_gt_roi_epe))
-        if args.detector_metrics and resume_payload.get("detector_plateau"):
-            detector_plateau = DetectorPlateauController.from_state_dict(resume_payload["detector_plateau"])
-        if args.detector_metrics and resume_payload.get("detector_checkpoint_selector"):
-            detector_selector = DetectorCheckpointSelector.from_state_dict(resume_payload["detector_checkpoint_selector"])
+        if args.detector_metrics:
+            saved = resume_payload.get("config", {})
+            same_protocol = (saved.get("score_threshold") == args.score_threshold
+                             and saved.get("validation_paired_nms_iou") == args.validation_paired_nms_iou)
+            if same_protocol:
+                if resume_payload.get("detector_plateau"):
+                    detector_plateau = DetectorPlateauController.from_state_dict(resume_payload["detector_plateau"])
+                if resume_payload.get("detector_checkpoint_selector"):
+                    detector_selector = DetectorCheckpointSelector.from_state_dict(resume_payload["detector_checkpoint_selector"])
+            else:
+                log("Detector validation protocol changed. Starting new plateau and checkpoint-selection metrics.")
 
     write_json(output_dir / "config.json", {"args": vars(args), "class_mapping": class_mapping,
         "num_classes": len(class_mapping), "dmax_roi": args.dmax_roi,

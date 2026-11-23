@@ -119,18 +119,27 @@ class _DecoupledPredictionLevel(nn.Module):
 class StereoYOLO26PanHead(nn.Module):
     """PAN-only stereo neck plus independent P3/P4/P5 direct prediction branches."""
 
-    def __init__(self, channels: int, num_classes: int, *, one_to_one: bool = False) -> None:
+    def __init__(
+        self, channels: int, num_classes: int, *, one_to_one: bool = False, one_to_one_only: bool = False,
+    ) -> None:
         super().__init__()
         if num_classes < 1:
             raise ValueError("num_classes must be positive")
+        if one_to_one_only and not one_to_one:
+            raise ValueError("one-to-one-only deployment requires a one-to-one head")
         self.neck = StereoYOLO26PanNeck(channels)
-        self.levels = nn.ModuleList([
+        levels = nn.ModuleList([
             _DecoupledPredictionLevel(channels, num_classes),
             _DecoupledPredictionLevel(channels, num_classes),
             _DecoupledPredictionLevel(channels, num_classes),
         ])
 
-        self.one_to_one_levels = deepcopy(self.levels) if one_to_one else None
+        if one_to_one_only:
+            self.levels = None
+            self.one_to_one_levels = levels
+        else:
+            self.levels = levels
+            self.one_to_one_levels = deepcopy(levels) if one_to_one else None
 
     @property
     def one_to_one_enabled(self) -> bool:
@@ -147,12 +156,15 @@ class StereoYOLO26PanHead(nn.Module):
         return DenseStereoPredictions(torch.cat(objectness, dim=1), torch.cat(classes, dim=1), torch.cat(boxes, dim=1))
 
     def forward(self, pyramid: object) -> DenseStereoPredictions:
-        levels = self.one_to_one_levels if self.one_to_one_enabled else self.levels
+        levels = self.one_to_one_levels if self.one_to_one_levels is not None else self.levels
+        assert levels is not None
         return self._predict(self.neck(pyramid), levels)
 
     def forward_training(self, pyramid: object) -> tuple[DenseStereoPredictions, DenseStereoPredictions]:
         if self.one_to_one_levels is None:
             raise RuntimeError("one-to-one training requires a one-to-one head")
+        if self.levels is None:
+            raise RuntimeError("deployment-only heads cannot run dual-branch training")
         features = self.neck(pyramid)
         many = self._predict(features, self.levels)
         one = self._predict(tuple(feature.detach() for feature in features), self.one_to_one_levels)

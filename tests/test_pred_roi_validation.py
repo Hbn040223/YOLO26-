@@ -56,6 +56,13 @@ class PredRoiValidationTest(unittest.TestCase):
         result=evaluate_pred_roi_frame(Encoder(),Detector(),StereoLocalInstanceHead(4,2),torch.randn(1,3,64,64),torch.randn(1,3,64,64),target,2,detector_variant="stereo_yolo26_pan",score_threshold=.5)
         self.assertEqual(result["matched_count"],1)
         self.assertEqual(result["target_count"],2)
+        target["classes"] = torch.tensor([0, 0])
+        wrong_class = evaluate_pred_roi_frame(
+            Encoder(), Detector(), nn.Identity(), torch.randn(1, 3, 64, 64), torch.randn(1, 3, 64, 64),
+            target, 2, detector_variant="stereo_yolo26_pan", score_threshold=.5,
+        )
+        self.assertEqual(wrong_class["matched_count"], 0)
+
 if __name__=="__main__":
     unittest.main()
 

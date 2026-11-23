@@ -24,7 +24,27 @@ def _pairwise_iou(first: Tensor, second: Tensor) -> Tensor:
     return inter/(area_first[:,None]+area_second[None,:]-inter).clamp_min(1e-8)
 
 
-def greedy_match_paired_detections(predictions: Tensor, targets: Tensor, scores: Tensor, minimum_quality: float=.5) -> PairedMatch:
+def paired_match_eligibility(
+    predictions: Tensor, targets: Tensor, minimum_quality: float, *,
+    prediction_classes: Tensor | None = None, target_classes: Tensor | None = None,
+) -> tuple[Tensor, Tensor]:
+    """Return min bilateral IoU and the same-GT eligibility mask."""
+    pl, pr = pair_boxes_to_lr(predictions)
+    tl, tr = pair_boxes_to_lr(targets)
+    quality = torch.minimum(_pairwise_iou(pl, tl), _pairwise_iou(pr, tr))
+    eligible = quality >= minimum_quality
+    if prediction_classes is not None or target_classes is not None:
+        if (prediction_classes is None or target_classes is None
+                or prediction_classes.shape != (len(predictions),) or target_classes.shape != (len(targets),)):
+            raise ValueError("both class tensors must align with their paired boxes")
+        eligible &= prediction_classes[:, None] == target_classes[None, :]
+    return quality, eligible
+
+
+def greedy_match_paired_detections(
+    predictions: Tensor, targets: Tensor, scores: Tensor, minimum_quality: float = .5, *,
+    prediction_classes: Tensor | None = None, target_classes: Tensor | None = None,
+) -> PairedMatch:
     """Greedy one-to-one match sorted by min(left IoU, right IoU), then score."""
     if predictions.ndim!=2 or predictions.shape[1]!=6 or targets.ndim!=2 or targets.shape[1]!=6:
         raise ValueError("paired boxes must have shape [N, 6]")
@@ -33,11 +53,12 @@ def greedy_match_paired_detections(predictions: Tensor, targets: Tensor, scores:
     if not predictions.numel() or not targets.numel():
         empty=torch.empty(0,dtype=torch.long,device=predictions.device)
         return PairedMatch(empty,empty, predictions.new_empty(0),0,targets.shape[0])
-    pl,pr=pair_boxes_to_lr(predictions)
-    tl,tr=pair_boxes_to_lr(targets)
-    quality=torch.minimum(_pairwise_iou(pl,tl),_pairwise_iou(pr,tr))
+    quality, eligible = paired_match_eligibility(
+        predictions, targets, minimum_quality,
+        prediction_classes=prediction_classes, target_classes=target_classes,
+    )
     candidates=[]
-    for prediction_index,target_index in (quality>=minimum_quality).nonzero().tolist():
+    for prediction_index,target_index in eligible.nonzero().tolist():
         candidates.append((float(quality[prediction_index,target_index]),float(scores[prediction_index]),prediction_index,target_index))
     candidates.sort(key=lambda item:(-item[0],-item[1],item[2],item[3]))
     used_predictions=set(); used_targets=set(); kept=[]
@@ -119,10 +140,11 @@ def _car_deployment_counts(
 
 @torch.no_grad()
 def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: Tensor, target: dict,
-                                       score_threshold: float = .25, pre_score_threshold: float = .01,
+                                       score_threshold: float = .40, pre_score_threshold: float = .01,
                                        pre_nms_topk: int = 500, *,
                                        right_offset_mode: str = "legacy_clamp",
-                                       car_cohort: tuple[int, list[int]] | None = None) -> dict:
+                                       car_cohort: tuple[int, list[int]] | None = None,
+                                       paired_nms_iou: float = .70) -> dict:
     """Detector-only validation: raw, score-filtered pre-NMS, and deployed paired metrics."""
     from .detection import anchorfree_prediction_scores, decode_anchorfree_predictions
     from .geometry import decode_anchorfree_boxes6, generate_point_locations, point_levels
@@ -147,12 +169,17 @@ def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: T
     deployed = decode_anchorfree_predictions(
         dense_dict, locations, score_threshold=score_threshold,
         pre_nms_topk=pre_nms_topk, right_offset_mode=right_offset_mode,
-        apply_nms=not getattr(detector, "one_to_one_enabled", False),
+        nms_threshold=paired_nms_iou, apply_nms=True,
     )
-    match = greedy_match_paired_detections(deployed.boxes6, targets, deployed.scores, .5)
+    target_classes = target["classes"].to(left.device)
+    match = greedy_match_paired_detections(
+        deployed.boxes6, targets, deployed.scores, .5,
+        prediction_classes=deployed.classes, target_classes=target_classes,
+    )
     pred_left, pred_right = pair_boxes_to_lr(deployed.boxes6)
     target_left, target_right = pair_boxes_to_lr(targets)
     qualifies = torch.minimum(_pairwise_iou(pred_left, target_left), _pairwise_iou(pred_right, target_right)) >= .5
+    qualifies &= deployed.classes[:, None] == target_classes[None, :]
     duplicate_pairs = qualifies.any(dim=1).sum() - match.matched_count
     raw_hits = hits(raw)
     deployed_hits = hits(deployed.boxes6)
@@ -169,15 +196,15 @@ def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: T
     size_groups = {name: dict(zip(("gt", "raw_left_hits", "deployed_left_hits", "paired_hits"), counts))
                    for name, counts in zip(groups, size_counts)}
     result = {"target_count": int(targets.shape[0]), "raw_dense_left_hits": int(raw_hits.sum()),
-            "pre_nms_left_hits_score_001": int(hits(pre).sum()), "deployment_left_hits_score_025": int(deployed_hits.sum()),
-            "paired_hits_score_025": match.matched_count, "post_nms_pairs_score_025": int(deployed.boxes6.shape[0]),
+            "pre_nms_left_hits_score_001": int(hits(pre).sum()), "deployment_left_hits": int(deployed_hits.sum()),
+            "paired_hits": match.matched_count, "post_nms_pairs": int(deployed.boxes6.shape[0]),
             "paired_duplicate_predictions": int(duplicate_pairs), "detection_size_groups": size_groups}
     if car_cohort is not None:
         if not getattr(detector, "one_to_one_enabled", False):
             raise ValueError("the car cohort audit requires one-to-one deployment")
-        car_pairs = decode_anchorfree_predictions(
+        car_pairs = deployed if score_threshold == .40 else decode_anchorfree_predictions(
             dense_dict, locations, score_threshold=.40, pre_nms_topk=pre_nms_topk,
-            right_offset_mode=right_offset_mode, apply_nms=False,
+            right_offset_mode=right_offset_mode, nms_threshold=paired_nms_iou, apply_nms=True,
         )
         car_class, near_indices = car_cohort
         valid_score = torch.isfinite(scores[finite][finite_raw])
@@ -191,9 +218,9 @@ def evaluate_anchorfree_detector_frame(encoder, detector, left: Tensor, right: T
 
 def evaluate_pred_roi_frame(
     encoder, detector, instance_head, left: Tensor, right: Tensor, target: dict,
-    dmax_roi: int, detector_variant: str, score_threshold: float=.05,
+    dmax_roi: int, detector_variant: str, score_threshold: float=.40,
     roi_margin: float=16., minimum_quality: float=.5,
-    *, right_offset_mode: str = "legacy_clamp",
+    *, right_offset_mode: str = "legacy_clamp", paired_nms_iou: float = .70,
 ) -> dict:
     """Evaluate prediction-driven RoIs using the same mask/iDisp metric formula as GT-RoI."""
     from .detection import decode_anchorfree_predictions, decode_dense_predictions, generate_grid_anchors
@@ -206,15 +233,19 @@ def evaluate_pred_roi_frame(
     if detector_variant=="stereo_yolo26_pan":
         pairs=decode_anchorfree_predictions(
             dense_dict, generate_point_locations(point_levels(pyramid), left.device), score_threshold,
-            right_offset_mode=right_offset_mode, apply_nms=not getattr(detector, "one_to_one_enabled", False),
+            right_offset_mode=right_offset_mode, nms_threshold=paired_nms_iou, apply_nms=True,
         )
     elif detector_variant=="baseline":
         levels=((pyramid.p3_left.shape[-2],pyramid.p3_left.shape[-1],8,32.),(pyramid.p4_left.shape[-2],pyramid.p4_left.shape[-1],16,64.),(pyramid.c5_left.shape[-2],pyramid.c5_left.shape[-1],32,128.))
-        pairs=decode_dense_predictions(dense_dict,generate_grid_anchors(levels,left.device),score_threshold)
+        pairs=decode_dense_predictions(dense_dict,generate_grid_anchors(levels,left.device),score_threshold,
+                                       nms_threshold=paired_nms_iou)
     else:
         raise ValueError("unsupported detector_variant")
     boxes=target["boxes6"].to(left.device)
-    match=greedy_match_paired_detections(pairs.boxes6,boxes,pairs.scores,minimum_quality)
+    match=greedy_match_paired_detections(
+        pairs.boxes6, boxes, pairs.scores, minimum_quality,
+        prediction_classes=pairs.classes, target_classes=target["classes"].to(left.device),
+    )
     result={"matched_count":match.matched_count,"target_count":match.target_count,"coverage":match.matched_count/max(match.target_count,1),"iou_sum":0.,"iou_count":0,"epe_sum":0.,"epe_count":0,"d1_hit":0,"d1_count":0}
     if not match.matched_count:
         return result
@@ -328,3 +359,34 @@ def evaluate_fixed_roi_pairs(pyramid: object, instance_head: object, left: Tenso
         gt_supervision.disparity_valid[:, 0], overlap & (pred_valid >= .5),
     )
     return metrics, gt_output, pred_output
+
+
+def mask_pixel_counts(prediction: Tensor, truth: Tensor, valid: Tensor) -> dict[str, Tensor]:
+    """Return per-instance counts on the requested grid with invalid pixels excluded."""
+    if prediction.shape != truth.shape or valid.shape != truth.shape or prediction.ndim < 2:
+        raise ValueError("prediction, truth and valid must share the Mask instance grid")
+    prediction = prediction.bool()
+    truth = truth.bool()
+    valid = valid.bool()
+    tp = (prediction & truth & valid).flatten(1).sum(1)
+    fp = (prediction & ~truth & valid).flatten(1).sum(1)
+    fn = (~prediction & truth & valid).flatten(1).sum(1)
+    return {"tp": tp, "fp": fp, "fn": fn, "valid_pixels": valid.flatten(1).sum(1)}
+
+
+def summarize_mask_counts(counts: dict[str, Tensor]) -> dict[str, float | int | None]:
+    """Macro IoU matches the E20 benchmark. Precision and recall pool valid pixels."""
+    tp, fp, fn, valid = (counts[key] for key in ("tp", "fp", "fn", "valid_pixels"))
+    union = tp + fp + fn
+    measured = union > 0
+    tp_total, fp_total, fn_total, valid_total = map(lambda values: int(values.sum()), (tp, fp, fn, valid))
+    pred_total, gt_total = tp_total + fp_total, tp_total + fn_total
+    return {
+        "instances": len(tp), "iou_instances": int(measured.sum()), "valid_pixels": valid_total,
+        "tp": tp_total, "fp": fp_total, "fn": fn_total,
+        "iou": float((tp[measured] / union[measured]).mean()) if measured.any() else None,
+        "precision": tp_total / pred_total if pred_total else (0. if gt_total else None),
+        "recall": tp_total / gt_total if gt_total else None,
+        "foreground_fraction": pred_total / valid_total if valid_total else None,
+        "empty_prediction": int(((tp + fp) == 0).sum()), "empty_gt": int(((tp + fn) == 0).sum()),
+    }
