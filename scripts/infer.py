@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from lightbackbone_stereo_yolo.data.frame_dataset import normalized_rgb
 from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_backbone
 from lightbackbone_stereo_yolo.mask import mask_logit_cutoff
-from lightbackbone_stereo_yolo.roi_selection import RoiPairSelection
+from lightbackbone_stereo_yolo.roi_selection import Near10Policy, RoiPairSelection
 from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead, StereoYoloLocalModel
 from lightbackbone_stereo_yolo.stereo_yolo26 import StereoYOLO26PanHead
 from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry, load_rectified_pair
@@ -44,7 +44,8 @@ def resolve_mask_threshold(bundle, override=None):
 
 def load_published_model(weights, openstereo_source, device, *, score=.40, topk=500,
                          apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None, roi_max_distance=None,
-                         bf_px_m=None, cx_delta_px=None, crop_top_px=0, containment_threshold=None):
+                         bf_px_m=None, cx_delta_px=None, crop_top_px=0, containment_threshold=None,
+                         near10_mode=None, near10_prefilter_m=15., near10_mask_iou=.60):
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
@@ -71,6 +72,8 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
                                        for key in bundle.get("foreground_mask_raw_classes", ())),
         mask_threshold=resolve_mask_threshold(bundle, mask_threshold), roi_selection=selection,
         crop_top_px=crop_top_px, containment_threshold=containment_threshold,
+        near10_policy=(Near10Policy(near10_mode, bundle["class_mapping"][26],
+                                   near10_prefilter_m, near10_mask_iou) if near10_mode is not None else None),
     )
     model.load_state_dict(bundle["model"], strict=True)
     return model.to(device).eval(), bundle
@@ -91,6 +94,10 @@ def main() -> None:
     parser.add_argument("--containment-threshold", type=float, default=.90)
     parser.add_argument("--mask-threshold", type=float, help="override the probability cutoff in the unfurled Mask logit space")
     parser.add_argument("--roi-max-distance", type=float, help="opt in to experimental near-Car foreground selection")
+    parser.add_argument("--near10-policy", choices=("baseline", "range", "range-dedup"),
+                        help="baseline measures 10 m without prefiltering")
+    parser.add_argument("--near10-prefilter-m", type=float, default=15.)
+    parser.add_argument("--near10-mask-iou", type=float, default=.60)
     parser.add_argument("--bf-px-m", type=float, help="fB from this stereo frame calibration")
     parser.add_argument("--cx-delta-px", type=float, help="left cx minus right cx in pixels")
     parser.add_argument("--output", type=Path, required=True)
@@ -100,6 +107,10 @@ def main() -> None:
     args = parser.parse_args()
     if args.containment_suppression and not args.paired_nms:
         parser.error("--containment-suppression requires --paired-nms")
+    has_calibration = args.bf_px_m is not None and args.cx_delta_px is not None
+    near10_mode = args.near10_policy
+    if near10_mode is not None and (not args.paired_nms or not has_calibration):
+        parser.error("10 m inference requires --paired-nms and both per-frame calibration values")
     evidence = source_info(ROOT, __file__, args.openstereo_source, args.weights) if (
         args.trace_json or args.expect_commit) else None
     if args.expect_commit and evidence["commit"] != args.expect_commit:
@@ -115,6 +126,7 @@ def main() -> None:
         bf_px_m=args.bf_px_m, cx_delta_px=args.cx_delta_px,
         crop_top_px=args.crop_top_px,
         containment_threshold=args.containment_threshold if args.containment_suppression else None,
+        near10_mode=near10_mode, near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
     )
     if not model.foreground_class_indices:
         warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",
@@ -126,9 +138,10 @@ def main() -> None:
     geometry = StereoInputGeometry(decoded_geometry.original_hw, args.crop_top_px)
     left, right = left.to(args.device), right.to(args.device)
     with torch.inference_mode():
+        calibration = (args.bf_px_m, args.cx_delta_px) if near10_mode is not None else None
         with capture_route(model) if args.trace_json else nullcontext() as route:
-            result = (model.forward_prepared(left, right, geometry, route=route) if args.input_path == "prepared"
-                      else model(left, right, route=route))
+            result = (model.forward_prepared(left, right, geometry, route=route, calibration=calibration)
+                      if args.input_path == "prepared" else model(left, right, route=route, calibration=calibration))
         arrays = {name: getattr(result, name).cpu().numpy() for name in (
             "boxes_left", "boxes_right", "scores", "classes", "disparity", "validity", "mask_validity",
             "pair_ids", "foreground_validity",
@@ -142,6 +155,8 @@ def main() -> None:
                 "left_only_distance_m": result.left_only.distance_m.cpu().numpy(),
             })
         arrays["roi_selection_enabled"] = np.asarray(model.roi_selection is not None)
+        if result.near10_distance_m is not None:
+            arrays["near10_distance_m"] = result.near10_distance_m.cpu().numpy()
         arrays["mask_probability"] = result.mask_logits.sigmoid().cpu().numpy()
         arrays["foreground_disparity"] = result.disparity.masked_fill(
             ~result.foreground_validity, torch.nan).cpu().numpy()

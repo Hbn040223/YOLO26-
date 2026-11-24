@@ -269,6 +269,53 @@ class EdgeAccelerationTest(unittest.TestCase):
         torch.testing.assert_close(prepared.crop.y0, result.crop.y0, atol=0, rtol=0)
         self.assertEqual(result.image_hw, (80, 64))
 
+    def test_near10_dispatches_only_the_surviving_car_and_skips_empty_expensive_head(self):
+        from lightbackbone_stereo_yolo.detection import DenseStereoPredictions
+        from lightbackbone_stereo_yolo.geometry import encode_anchorfree_boxes6
+        from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead
+        from lightbackbone_stereo_yolo.roi_selection import Near10Policy
+        from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry
+
+        features = {name: torch.ones(1, 4, size, size) for name, size in (
+            ("p2_left", 16), ("p2_right", 16), ("p3_left", 8), ("p4_left", 4), ("c5_left", 2))}
+        pyramid = SimpleNamespace(**features)
+        head = StereoLocalInstanceHead(4, 1, hidden_channels=4, roi_sampling="fixed_56")
+        # Known foreground in both candidates so the test exercises the actual Mask and iDisp path.
+        with torch.no_grad():
+            for parameter in head.mask.parameters():
+                parameter.fill_(.1)
+        model = StereoYoloLocalModel(nn.Identity(), nn.Identity(), head, detector_variant="stereo_yolo26_pan",
+            apply_paired_nms=True, right_offset_mode="signed", foreground_class_indices=(1,),
+            near10_policy=Near10Policy("range-dedup", 1)).eval()
+        obj = torch.full((1, 84), -20.)
+        obj[0, [9, 10]] = torch.tensor([8., 6.])
+        classes = torch.zeros(1, 84, 2)
+        classes[0, [9, 10], 1] = 10.
+        boxes = torch.zeros(1, 84, 6)
+        boxes[0, [9, 10]] = encode_anchorfree_boxes6(
+            torch.tensor([[8., 4., 36., 36., 4., 32.], [12., 8., 32., 28., 8., 28.]]),
+            torch.tensor([[12., 12., 8.], [20., 12., 8.]]),
+        )
+        predictions = DenseStereoPredictions(obj, classes, boxes)
+        image = torch.zeros(1, 3, 64, 64)
+        geometry = StereoInputGeometry((64, 64))
+        seen = []
+        with torch.inference_mode():
+            handle = head.idisp.register_forward_pre_hook(lambda _, args: seen.append(len(args[0])))
+            try:
+                route = {}
+                model.decode_and_refine(image, pyramid, predictions, input_geometry=geometry,
+                                        route=route, calibration=(24., 0.))
+                self.assertEqual(route["range_kept"].indices.tolist(), [9, 10])
+                self.assertEqual(route["idisp"].indices.tolist(), [9])
+                self.assertEqual(seen, [1])
+                distant = model.decode_and_refine(image, pyramid, predictions, input_geometry=geometry,
+                                                  route={}, calibration=(390., 0.))
+                self.assertEqual(distant.pair_ids.tolist(), [])
+                self.assertEqual(len(seen), 1)
+            finally:
+                handle.remove()
+
     def test_manifest_rejects_previous_schema_and_mixed_nchw_bindings(self):
         from lightbackbone_stereo_yolo.edge_deployment import FRONTEND_SCHEMA, manifest_geometry
 

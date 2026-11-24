@@ -1,7 +1,9 @@
 """Residual disparity matching restricted to paired P2 RoIs."""
 from __future__ import annotations
+from contextlib import nullcontext
 from dataclasses import dataclass
 import torch
+from torch.profiler import record_function
 from torch import Tensor, nn
 from torch.nn import functional as F
 from .roi import CropMetadata
@@ -43,6 +45,7 @@ class RoiDisparity:
 
 
 class RegularizedIDispHead(nn.Module):
+    amp_aggregation = False
     """Default RoI-only iDisp: cosine cost, local 2D regularization, soft-argmax."""
 
     def __init__(self, channels: int, dmax_roi: int, hidden_channels: int = 32) -> None:
@@ -84,19 +87,25 @@ class RegularizedIDispHead(nn.Module):
         return self._aggregate_by_native_size(cost, attention, metadata, spatial_valid)
 
     def forward(self, left: Tensor, right: Tensor, attention: AttentionPyramid, metadata: CropMetadata, spatial_valid: Tensor) -> RoiDisparity:
-        volume = build_local_cost_volume(left, right, self.search, spatial_valid, self.temperature)
-        refined = self._aggregate_cost(volume.cost, attention, metadata, volume.spatial_valid)
-        logits = torch.where(
-            volume.spatial_valid,
-            refined.masked_fill(~volume.valid_bins, float("-inf")),
-            torch.zeros_like(refined),
-        )
-        probability = torch.softmax(logits, dim=1)
-        offsets = torch.arange(-self.search.dmax_roi, self.search.dmax_roi + 1, device=left.device, dtype=left.dtype)
-        residual = (probability * offsets[None, :, None, None]).sum(1)
-        peak = probability.max(1).values
-        entropy = -(probability.clamp_min(torch.finfo(probability.dtype).tiny) * probability.clamp_min(torch.finfo(probability.dtype).tiny).log()).sum(1)
-        absolute = restore_absolute_disparity(residual, metadata)
+        with record_function("stereo.cost_volume"):
+            volume = build_local_cost_volume(left, right, self.search, spatial_valid, self.temperature)
+        amp = torch.autocast("cuda", dtype=torch.float16) if self.amp_aggregation else nullcontext()
+        with record_function("stereo.local_aggregation"), amp:
+            refined = self._aggregate_cost(volume.cost, attention, metadata, volume.spatial_valid).to(left.dtype)
+        with record_function("stereo.disparity_regression"):
+            logits = torch.where(
+                volume.spatial_valid,
+                refined.masked_fill(~volume.valid_bins, float("-inf")),
+                torch.zeros_like(refined),
+            )
+            probability = torch.softmax(logits, dim=1)
+            offsets = torch.arange(-self.search.dmax_roi, self.search.dmax_roi + 1,
+                                   device=left.device, dtype=left.dtype)
+            residual = (probability * offsets[None, :, None, None]).sum(1)
+            peak = probability.max(1).values
+            safe = probability.clamp_min(torch.finfo(probability.dtype).tiny)
+            entropy = -(safe * safe.log()).sum(1)
+            absolute = restore_absolute_disparity(residual, metadata)
         return RoiDisparity(residual, absolute, volume.valid_bins.any(1), peak, entropy)
 
 

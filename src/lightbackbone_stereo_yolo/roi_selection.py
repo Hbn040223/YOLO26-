@@ -42,6 +42,98 @@ class LeftOnlyDetections:
     distance_m: torch.Tensor
 
 
+@dataclass(frozen=True)
+class Near10Policy:
+    mode: str
+    car_class: int
+    prefilter_m: float = 15.
+    mask_iou: float = .60
+
+    def __post_init__(self):
+        if self.mode not in ("baseline", "range", "range-dedup"):
+            raise ValueError("invalid 10 m policy")
+        if not 10 <= self.prefilter_m < math.inf or not 0 < self.mask_iou <= 1:
+            raise ValueError("invalid 10 m prefilter distance or Mask IoU")
+
+
+@dataclass(frozen=True)
+class Near10Geometry:
+    disparity: torch.Tensor
+    admitted: torch.Tensor
+    far: torch.Tensor
+    left_only: torch.Tensor
+    invalid: torch.Tensor
+
+
+def near10_geometry(pairs, image_hw, calibration, policy):
+    bf, cx_delta = calibration
+    if not math.isfinite(bf) or bf <= 0 or not math.isfinite(cx_delta):
+        raise ValueError("10 m policy requires positive fB and finite cx difference")
+    left, right = pair_boxes_to_lr(pairs.boxes6.float())
+    height, width = image_hw
+    bounds = left.new_tensor((width, height))
+
+    def visible(box):
+        return (torch.isfinite(box).all(1) & (box[:, 2:] > box[:, :2]).all(1)
+                & (box[:, :2] < bounds).all(1) & (box[:, 2:] > 0).all(1))
+
+    valid_left = visible(left)
+    disparity = .5 * (left[:, 0] + left[:, 2] - right[:, 0] - right[:, 2]) - cx_delta
+    stereo = valid_left & visible(right) & torch.isfinite(disparity) & (disparity > 0)
+    # Border contact is conservative: the predicted center can shift on truncation.
+    interior = ((left[:, :2] > 0) & (right[:, :2] > 0)
+                & (left[:, 2:] < bounds) & (right[:, 2:] < bounds)).all(1)
+    far = stereo & interior & (disparity < bf / policy.prefilter_m)
+    return Near10Geometry(disparity, stereo & ~far, far, valid_left & ~stereo, ~valid_left)
+
+
+def near10_conflicts(pairs, disparity, policy):
+    left, right = pair_boxes_to_lr(pairs.boxes6.float())
+
+    def overlaps(box):
+        lo = torch.maximum(box[:, None, :2], box[None, :, :2])
+        hi = torch.minimum(box[:, None, 2:], box[None, :, 2:])
+        inter = (hi - lo).clamp_min(0).prod(2)
+        area = (box[:, 2:] - box[:, :2]).prod(1)
+        return inter / (area[:, None] + area - inter), inter / area
+
+    left_iou, left_cover = overlaps(left)
+    right_iou, right_cover = overlaps(right)
+    contained = (left_cover >= .90) & (right_cover >= .90)
+    # Row candidate may suppress a lower-scored column candidate.
+    priority = ((pairs.scores[:, None] > pairs.scores)
+                | ((pairs.scores[:, None] == pairs.scores) & (pairs.indices[:, None] < pairs.indices)))
+    geometry = ((left_iou >= .35) & (right_iou >= .35)) | contained
+    tolerance = (.10 * torch.minimum(disparity[:, None], disparity)).clamp_min(2.)
+    close = (disparity[:, None] - disparity).abs() <= tolerance
+    car = pairs.classes == policy.car_class
+    return priority & geometry & close & car[:, None] & car
+
+
+def near10_keep(pairs, conflicts, masks, policy):
+    flat = masks.flatten(1).float()
+    area = flat.sum(1)
+    intersection = flat @ flat.T
+    iou = intersection / (area[:, None] + area - intersection).clamp_min(1)
+    conflicts = (conflicts & (iou >= policy.mask_iou)).cpu().numpy()
+    order = np.lexsort((pairs.indices.cpu().numpy(), -pairs.scores.detach().cpu().numpy()))
+    blocked = np.zeros(len(order), dtype=bool)
+    for index in order:
+        if not blocked[index]:
+            blocked |= conflicts[index]
+    return pairs.indices.new_tensor(np.flatnonzero(~blocked))
+
+
+def near10_measure(disparity, valid, calibration):
+    bf, cx_delta = calibration
+    if len(disparity) == 0:
+        return disparity.new_empty((0,), dtype=torch.float32)
+    corrected = disparity.float() - cx_delta
+    valid = valid & torch.isfinite(corrected) & (corrected > 0)
+    median = corrected.masked_fill(~valid, float("nan")).flatten(1).nanmedian(dim=1).values
+    return bf / median
+
+
 def subset_pairs(pairs, selected):
     return PairDetections(pairs.boxes6[selected],pairs.scores[selected],pairs.indices[selected],
                           pairs.classes[selected])

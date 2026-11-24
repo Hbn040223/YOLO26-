@@ -58,6 +58,7 @@ def capture_route(model):
 
 
 def serialize_route(route):
-    pairs = ("pre_nms", "post_nms", "idisp")
+    pairs = ("pre_nms", "post_nms", "idisp", "range_far", "range_unknown", "range_invalid",
+             "range_kept", "near10_unknown", "near10_final")
     return {**{key: value for key, value in route.items() if key not in (*pairs, "dense")},
             **{key + "_pair_ids": route[key].indices.tolist() for key in pairs if key in route}}
