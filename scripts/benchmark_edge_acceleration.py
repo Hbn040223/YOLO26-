@@ -179,6 +179,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--profile", action="store_true", help="run synchronized profiling after timing")
     parser.add_argument("--input-path", choices=("prepared", "model"), default="prepared")
+    parser.add_argument("--compare-input-paths", action="store_true",
+                        help="alternate model-side and prepared crop in the same per-frame timing run")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.repeats < 1 or args.warmup < 0:
@@ -191,12 +193,18 @@ def main():
     records = validation_dataset(args.dataset_root, args.split_json, bundle).records
     if not records:
         parser.error("the split has no frames")
-    settings = CONFIGURATIONS[args.stage]
+    configured = CONFIGURATIONS[args.stage]
+    if args.compare_input_paths:
+        settings = {f"{arm}_{path}": value for arm, value in configured.items() for path in ("model", "prepared")}
+        input_paths = {arm: arm.rsplit("_", 1)[1] for arm in settings}
+    else:
+        settings = configured
+        input_paths = dict.fromkeys(settings, args.input_path)
     arms = list(settings)
     for _ in range(args.warmup):
         for arm, setting in settings.items():
             configure(model, setting)
-            measure(model, records[0], bundle["normalization"], device, args.input_path)
+            measure(model, records[0], bundle["normalization"], device, input_paths[arm])
     timings = []
     for frame, record in enumerate(records):
         for repeat in range(args.repeats):
@@ -204,7 +212,7 @@ def main():
             row = {"frame_id": record.frame_id, "repeat": repeat}
             for arm in arms[offset:] + arms[:offset]:
                 configure(model, settings[arm])
-                row[arm] = measure(model, record, bundle["normalization"], device, args.input_path)
+                row[arm] = measure(model, record, bundle["normalization"], device, input_paths[arm])
             timings.append(row)
     profiles = []
     if args.profile:
@@ -213,15 +221,16 @@ def main():
             row = {"frame_id": record.frame_id}
             for arm, setting in settings.items():
                 configure(model, setting)
-                crop = model.crop_top_px if args.input_path == "prepared" else 0
+                prepared = input_paths[arm] == "prepared"
+                crop = model.crop_top_px if prepared else 0
                 left, right, geometry = load_rectified_pair(record.left_image, record.right_image, normalization, crop)
                 row[arm] = profile_forward(model, left.to(device), right.to(device), device,
-                                           geometry if args.input_path == "prepared" else None)
+                                           geometry if prepared else None)
             profiles.append(row)
     write_json(args.output, {
         "commit": revision(ROOT), "openstereo_commit": revision(args.openstereo_source),
         "weight_sha256": sha256(args.weights), "split_sha256": sha256(args.split_json),
-        "settings": settings, "input_path": args.input_path, "torch_version": str(torch.__version__), "device": str(device),
+        "settings": settings, "input_paths": input_paths, "torch_version": str(torch.__version__), "device": str(device),
         "device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU",
         "power_mode": args.power_mode, "precision": str(next(model.parameters()).dtype),
         "score": model.score_threshold, "topk": model.pre_nms_topk, "paired_nms_iou": model.paired_nms_iou,
@@ -232,6 +241,10 @@ def main():
         "warmup": args.warmup, "timings": timings, "profiles": profiles,
         "summary": {arm: summarize([row[arm] for row in timings]) for arm in arms},
         "end_to_end_p95_paired_frame_bootstrap": bootstrap_p95_differences(timings, arms),
+        "placement_p95_paired_frame_bootstrap": {
+            arm: bootstrap_p95_differences(timings, [f"{arm}_model", f"{arm}_prepared"])
+            for arm in configured
+        } if args.compare_input_paths else {},
         "profile_summary": {arm: summarize([row[arm] for row in profiles]) for arm in arms} if profiles else {},
         "runtime_source": source_info(ROOT, __file__, args.openstereo_source, args.weights),
     })
