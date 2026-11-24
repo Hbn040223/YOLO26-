@@ -92,8 +92,7 @@ def _register_openstereo_packages(source: Path) -> None:
         sys.path.insert(0, str(source))
 
 
-def build_lightstereo_backbone(source_root: str | Path) -> nn.Module:
-    """Construct the official feature backbone without downloading weights."""
+def _register_lightstereo_source(source_root: str | Path) -> None:
 
     source = Path(source_root)
     referenced = source / "references" / "OpenStereo"
@@ -102,6 +101,11 @@ def build_lightstereo_backbone(source_root: str | Path) -> nn.Module:
     if not (source / "stereo" / "modeling" / "models" / "lightstereo" / "backbone.py").is_file():
         raise FileNotFoundError(f"OpenStereo LightStereo source not found under {source}")
     _register_openstereo_packages(source)
+
+
+def build_lightstereo_backbone(source_root: str | Path) -> nn.Module:
+    """Construct the official feature backbone without downloading weights."""
+    _register_lightstereo_source(source_root)
     import timm
     from stereo.modeling.models.lightstereo.backbone import Backbone
 
@@ -113,6 +117,44 @@ def build_lightstereo_backbone(source_root: str | Path) -> nn.Module:
 
     with patch.object(timm, "create_model", side_effect=no_download):
         return Backbone("MobileNetv2")
+
+
+class MobileNetV3SmallFpn(nn.Module):
+    """MobileNetV3-Small through stride 32 with the LightStereo top-down FPN."""
+
+    output_channels = (16, 24, 48, 96)
+
+    def __init__(self, mobilenet, fpn_layer, p2_norm):
+        super().__init__()
+        self.stem = nn.Sequential(mobilenet.conv_stem, mobilenet.bn1, mobilenet.act1)
+        self.blocks = mobilenet.blocks[:5]
+        self.fpn_layer4 = fpn_layer(96, 48)
+        self.fpn_layer3 = fpn_layer(48, 24)
+        self.fpn_layer2 = fpn_layer(24, 16)
+        self.out_conv = p2_norm
+
+    def forward(self, images):
+        c2 = self.blocks[0](self.stem(images))
+        c3 = self.blocks[1](c2)
+        c4 = self.blocks[3](self.blocks[2](c3))
+        c5 = self.blocks[4](c4)
+        p4 = self.fpn_layer4(c5, c4)
+        p3 = self.fpn_layer3(p4, c3)
+        p2 = self.out_conv(self.fpn_layer2(p3, c2))
+        return p2, p3, p4, c5
+
+
+def build_lightstereo_v3small(source_root: str | Path, *, pretrained: bool = False) -> nn.Module:
+    """Build the V3 speed prototype with the repository's pinned TIMM layout."""
+    _register_lightstereo_source(source_root)
+    import timm
+    from stereo.modeling.common.basic_block_2d import BasicConv2d
+    from stereo.modeling.models.lightstereo.backbone import FPNLayer
+
+    mobilenet = timm.create_model("mobilenetv3_small_100", features_only=True, pretrained=pretrained)
+    p2_norm = BasicConv2d(16, 16, kernel_size=3, padding=1, padding_mode="replicate",
+                          norm_layer=nn.InstanceNorm2d)
+    return MobileNetV3SmallFpn(mobilenet, FPNLayer, p2_norm)
 
 
 def load_lightstereo_backbone(source_root: str | Path, checkpoint: str | Path) -> nn.Module:

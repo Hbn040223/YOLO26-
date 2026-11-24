@@ -81,6 +81,57 @@ class EdgeAccelerationTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "taller than"):
             make_pair_crop_windows(boxes, 48, 64, 16., roi_sampling="fixed_56")
 
+    def test_locked_roi_replay_preserves_input_ids_metadata_and_pair_count(self):
+        class Detector(nn.Module):
+            def forward(self, pyramid):
+                self.calls += 1
+                return None
+
+        class Instance(nn.Module):
+            def forward(self, pyramid, boxes, height, width):
+                self.count = len(boxes)
+                z = boxes.new_zeros((self.count, 1, 1))
+                return SimpleNamespace(mask_logits=z, mask_validity=z.bool(), disparity=z,
+                                       validity=z.bool(), peak=z, entropy=z)
+
+        class Encoder(nn.Module):
+            def forward(self, left, right):
+                return SimpleNamespace(**{name: left for name in ("p2_left", "p2_right", "p3_left", "p4_left")})
+
+        detector = Detector()
+        detector.calls = 0
+        instance = Instance()
+        model = StereoYoloLocalModel(Encoder(), detector, instance, detector_variant="stereo_yolo26_pan")
+        image = torch.zeros(1, 3, 64, 64)
+        pair = PairDetections(torch.tensor([[6., 0., 32., 26., 2., 28.]]).expand(6, -1),
+                              torch.ones(6), torch.arange(10, 16), torch.ones(6, dtype=torch.long))
+        output = model(image, image, replay_pairs=pair)
+        self.assertEqual(detector.calls, 1)
+        self.assertEqual(instance.count, 6)
+        self.assertEqual(output.pair_ids.tolist(), list(range(10, 16)))
+
+    def test_export_frontend_passes_dense_outputs_and_only_needed_feature_maps(self):
+        from lightbackbone_stereo_yolo.edge_deployment import FRONTEND_OUTPUTS, StaticStereoFrontend
+
+        class Encoder(nn.Module):
+            def forward(self, left, right):
+                return SimpleNamespace(p2_left=left, p2_right=right, p3_left=left * 3, p4_left=left * 4,
+                                       c5_left=left * 5)
+
+        class Detector(nn.Module):
+            def forward(self, pyramid):
+                return SimpleNamespace(objectness=pyramid.p2_left, class_logits=pyramid.p2_right,
+                                       box6=pyramid.p3_left)
+
+        frontend = StaticStereoFrontend(Encoder(), Detector())
+        left = torch.ones(1, 3, 8, 8)
+        right = left * 2
+        tensors = dict(zip(FRONTEND_OUTPUTS, frontend(left, right)))
+        self.assertEqual(list(tensors), ["objectness", "class_logits", "box6", "p2_left",
+                                         "p2_right", "p3_left", "p4_left", "c5_left"])
+        torch.testing.assert_close(tensors["box6"], left * 3)
+        torch.testing.assert_close(tensors["c5_left"], left * 5)
+
     def test_crop_and_containment_reach_the_real_roi_path(self):
         from lightbackbone_stereo_yolo.detection import DenseStereoPredictions
         from lightbackbone_stereo_yolo.geometry import encode_anchorfree_boxes6
@@ -121,8 +172,9 @@ class EdgeAccelerationTest(unittest.TestCase):
             with torch.inference_mode():
                 zero = model(left, right)
                 self.assertEqual(zero.pair_ids.tolist(), [9, 10])
-                model.crop_top_px = 16
                 model.containment_threshold = .90
+                uncropped_one = model(left, right)
+                model.crop_top_px = 16
                 result = model(left, right)
         finally:
             hook.remove()
@@ -134,5 +186,5 @@ class EdgeAccelerationTest(unittest.TestCase):
         torch.testing.assert_close(seen[-1][0], seen[0][0][:1])
         torch.testing.assert_close(result.boxes_right, zero.boxes_right[:1] + torch.tensor([0., 16., 0., 16.]))
         torch.testing.assert_close(result.crop.y0, zero.crop.y0[:1] + 16)
-        torch.testing.assert_close(result.disparity, zero.disparity[:1])
+        torch.testing.assert_close(result.disparity, uncropped_one.disparity)
         self.assertEqual(result.image_hw, (80, 64))

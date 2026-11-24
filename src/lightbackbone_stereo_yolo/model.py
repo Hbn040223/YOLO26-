@@ -10,7 +10,7 @@ from .local_aggregation import AttentionPyramid
 from .roi_selection import LeftOnlyDetections, RoiPairSelection, select_roi_pairs, subset_pairs, subset_crop, project_foreground, keep_foreground_pairs, _iou
 from .geometry import generate_point_locations, point_levels
 from .detection import (
-    ContainmentEvent, StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions,
+    ContainmentEvent, PairDetections, StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions,
     generate_grid_anchors, suppress_contained_pairs,
 )
 
@@ -194,21 +194,36 @@ class StereoYoloLocalModel(nn.Module):
                 raise ValueError("near selection requires trained Car foreground")
         self.roi_selection = roi_selection
 
-    def forward(self, left: Tensor, right: Tensor) -> StereoYoloLocalOutput:
+    def forward(
+        self, left: Tensor, right: Tensor, *, replay_pairs: PairDetections | None = None,
+    ) -> StereoYoloLocalOutput:
         if left.shape[0] != 1:
             raise ValueError("baseline inference currently accepts one stereo pair per call")
-        image_hw = tuple(left.shape[-2:])
         crop_top_px = self.crop_top_px
-        if crop_top_px >= image_hw[0]:
+        if crop_top_px >= left.shape[-2]:
             raise ValueError("crop_top_px must be less than image height")
         if crop_top_px:
             if left.shape != right.shape:
                 raise ValueError("left and right must be equal-shape NCHW image tensors")
-            left, right = left[..., crop_top_px:, :], right[..., crop_top_px:, :]
-        pyramid = self.encoder(left, right)
-        encoder_padded_hw = getattr(getattr(pyramid, "metadata", None), "padded_size", None)
+            pyramid = self.encoder(left[..., crop_top_px:, :], right[..., crop_top_px:, :])
+        else:
+            pyramid = self.encoder(left, right)
         dense = self.detector(pyramid)
-        if self.detector_variant == "stereo_yolo26_pan":
+        return self.decode_and_refine(left, pyramid, dense, replay_pairs=replay_pairs)
+
+    def decode_and_refine(
+        self, left: Tensor, pyramid: object, dense: object, *, replay_pairs: PairDetections | None = None,
+    ) -> StereoYoloLocalOutput:
+        """Decode frontend tensors and run native RoI heads in cropped coordinates."""
+        image_hw = tuple(left.shape[-2:])
+        crop_top_px = self.crop_top_px
+        cropped_hw = (image_hw[0] - crop_top_px, image_hw[1])
+        encoder_padded_hw = getattr(getattr(pyramid, "metadata", None), "padded_size", None)
+        if replay_pairs is not None:
+            if self.roi_selection is not None or self.containment_threshold is not None:
+                raise ValueError("fixed RoI replay requires ordinary instance dispatch")
+            pair = replay_pairs
+        elif self.detector_variant == "stereo_yolo26_pan":
             locations = generate_point_locations(point_levels(pyramid), left.device)
             pair = decode_anchorfree_predictions(
                 {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
@@ -238,7 +253,7 @@ class StereoYoloLocalModel(nn.Module):
         if self.roi_selection is not None:
             pair, left_only = select_roi_pairs(pair,
                 {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
-                locations, left.shape[-2:], self.roi_selection, self.right_offset_mode)
+                locations, cropped_hw, self.roi_selection, self.right_offset_mode)
             if crop_top_px:
                 left_only = replace(left_only, boxes=restore_box_rows(left_only.boxes, crop_top_px))
         if pair.boxes6.numel() == 0:
@@ -259,10 +274,10 @@ class StereoYoloLocalModel(nn.Module):
         roi_pyramid = type("RoiPyramid", (), {name: getattr(pyramid, name).expand(count, -1, -1, -1) for name in ("p2_left", "p2_right", "p3_left", "p4_left")})()
         roi_options = {"fit_vertical_extent": True} if crop_top_px else {}
         if self.roi_selection is None:
-            instance = self.instance_head(roi_pyramid, pair.boxes6, left.shape[-2], left.shape[-1], **roi_options)
+            instance = self.instance_head(roi_pyramid, pair.boxes6, *cropped_hw, **roi_options)
         else:
             pair, instance = self.instance_head.forward_selected(
-                pyramid, pair, left.shape[-2], left.shape[-1], self.mask_threshold, **roi_options)
+                pyramid, pair, *cropped_hw, self.mask_threshold, **roi_options)
         boxes_left = pair.boxes6[:, :4]
         boxes_right = torch.stack((pair.boxes6[:, 4], pair.boxes6[:, 1], pair.boxes6[:, 5], pair.boxes6[:, 3]), 1)
         foreground = torch.zeros_like(instance.validity)
