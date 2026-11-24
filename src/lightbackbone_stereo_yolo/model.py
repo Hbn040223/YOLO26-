@@ -55,9 +55,11 @@ class StereoLocalInstanceHead(nn.Module):
         self.idisp = RegularizedIDispHead(channels, dmax_roi, hidden_channels)
 
     def _disparity_forward(
-        self, pyramid: object, boxes6: Tensor, image_height: int, image_width: int, margin: float
+        self, pyramid: object, boxes6: Tensor, image_height: int, image_width: int, margin: float, *,
+        fit_vertical_extent: bool = False,
     ) -> tuple[RoiDisparity, CropMetadata, Tensor, Tensor]:
-        crop = make_pair_crop_windows(boxes6, image_height, image_width, margin, roi_sampling=self.roi_sampling)
+        crop = make_pair_crop_windows(boxes6, image_height, image_width, margin, roi_sampling=self.roi_sampling,
+                                      fit_vertical_extent=fit_vertical_extent)
         left_roi, right_roi, spatial_valid, _ = self.roi(pyramid.p2_left, pyramid.p2_right, boxes6, crop)
         p3_roi, _ = self.p3_roi(pyramid.p3_left, crop)
         p4_roi, _ = self.p4_roi(pyramid.p4_left, crop)
@@ -73,15 +75,17 @@ class StereoLocalInstanceHead(nn.Module):
         left_roi, spatial_valid = sample_roi_feature(features, crop.c_l, crop, self.roi.stride)
         return left_roi, align_mask_spatial_valid(spatial_valid), crop
 
-    def forward_selected(self, pyramid, pairs, image_height, image_width, mask_threshold):
+    def forward_selected(self, pyramid, pairs, image_height, image_width, mask_threshold,
+                         *, fit_vertical_extent=False):
         """Reuse Mask and P2-left RoIs; build disparity only for kept pairs."""
         count = len(pairs.indices)
         hw = (image_height, image_width)
         if count < 2 or not bool((_iou(pairs.boxes6[:, :4], pairs.boxes6[:, :4]) >= .35).triu(1).any()):
             roi = type("RoiPyramid", (), {n:getattr(pyramid,n).expand(count,-1,-1,-1)
                 for n in ("p2_left","p2_right","p3_left","p4_left")})()
-            return pairs, self(roi, pairs.boxes6, *hw)
-        crop = make_pair_crop_windows(pairs.boxes6, *hw, 16., roi_sampling=self.roi_sampling)
+            return pairs, self(roi, pairs.boxes6, *hw, fit_vertical_extent=fit_vertical_extent)
+        crop = make_pair_crop_windows(pairs.boxes6, *hw, 16., roi_sampling=self.roi_sampling,
+                                      fit_vertical_extent=fit_vertical_extent)
         left, spatial = sample_roi_feature(pyramid.p2_left.expand(count,-1,-1,-1), crop.c_l, crop, 4)
         logits = self.mask(left)
         mask_validity = align_mask_spatial_valid(spatial)
@@ -104,9 +108,12 @@ class StereoLocalInstanceHead(nn.Module):
         disparity, crop, _, _ = self._disparity_forward(pyramid, boxes6, image_height, image_width, margin)
         return disparity, crop
 
-    def forward(self, pyramid: object, boxes6: Tensor, image_height: int, image_width: int, margin: float = 16.) -> InstanceDisparityOutput:
+    def forward(
+        self, pyramid: object, boxes6: Tensor, image_height: int, image_width: int, margin: float = 16., *,
+        fit_vertical_extent: bool = False,
+    ) -> InstanceDisparityOutput:
         disparity, crop, left_roi, spatial_valid = self._disparity_forward(
-            pyramid, boxes6, image_height, image_width, margin
+            pyramid, boxes6, image_height, image_width, margin, fit_vertical_extent=fit_vertical_extent,
         )
         return InstanceDisparityOutput(
             mask_logits=self.mask(left_roi),
@@ -250,11 +257,12 @@ class StereoYoloLocalModel(nn.Module):
         # RoI branches expect one feature item per candidate; repeat only feature maps, not the encoder.
         count = pair.boxes6.shape[0]
         roi_pyramid = type("RoiPyramid", (), {name: getattr(pyramid, name).expand(count, -1, -1, -1) for name in ("p2_left", "p2_right", "p3_left", "p4_left")})()
+        roi_options = {"fit_vertical_extent": True} if crop_top_px else {}
         if self.roi_selection is None:
-            instance = self.instance_head(roi_pyramid, pair.boxes6, left.shape[-2], left.shape[-1])
+            instance = self.instance_head(roi_pyramid, pair.boxes6, left.shape[-2], left.shape[-1], **roi_options)
         else:
             pair, instance = self.instance_head.forward_selected(
-                pyramid, pair, left.shape[-2], left.shape[-1], self.mask_threshold)
+                pyramid, pair, left.shape[-2], left.shape[-1], self.mask_threshold, **roi_options)
         boxes_left = pair.boxes6[:, :4]
         boxes_right = torch.stack((pair.boxes6[:, 4], pair.boxes6[:, 1], pair.boxes6[:, 5], pair.boxes6[:, 3]), 1)
         foreground = torch.zeros_like(instance.validity)

@@ -67,6 +67,20 @@ class EdgeAccelerationTest(unittest.TestCase):
         self.assertIs(restore_box_rows(boxes[:, :4], 0)._base, boxes)
         self.assertEqual(restore_box_rows(torch.empty(0, 4), 16).shape, (0, 4))
 
+    def test_fixed_roi_fits_a_truncated_image_when_margin_exceeds_remaining_height(self):
+        from lightbackbone_stereo_yolo.roi import make_pair_crop_windows
+
+        boxes = torch.tensor([[20., -4., 40., 50., 16., 36.]])
+        crop = make_pair_crop_windows(boxes, 48, 64, 16., roi_sampling="fixed_56",
+                                      fit_vertical_extent=True)
+        self.assertEqual(crop.y0.tolist(), [0.])
+        self.assertEqual(crop.h_crop.tolist(), [48.])
+        self.assertEqual(crop.h_roi.tolist(), [56])
+        self.assertEqual(crop.c_l.tolist(), [4.])
+        self.assertEqual(crop.c_r.tolist(), [0.])
+        with self.assertRaisesRegex(ValueError, "taller than"):
+            make_pair_crop_windows(boxes, 48, 64, 16., roi_sampling="fixed_56")
+
     def test_crop_and_containment_reach_the_real_roi_path(self):
         from lightbackbone_stereo_yolo.detection import DenseStereoPredictions
         from lightbackbone_stereo_yolo.geometry import encode_anchorfree_boxes6
