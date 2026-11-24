@@ -115,7 +115,8 @@ def main():
     device = torch.device(args.device)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
         near10_mode="range" if args.range_only else "range-dedup",
-        near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou)
+        near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
+        near10_review_box_iou=args.near10_review_box_iou)
     mapping = bundle["class_mapping"]
     dataset = validation_dataset(args.dataset_root, args.split_json, bundle, load_images=False)
     modes = {"R0": "baseline", "R1": "range"}
@@ -172,7 +173,8 @@ def main():
                      "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
                      "split_sha256": digest(args.split_json), "calibration_sha256": digest(args.calibration_zip),
                      "match_iou": args.match_iou, "near_m": 10., "prefilter_m": args.near10_prefilter_m,
-                     "mask_iou": args.near10_mask_iou, "small_sample_reporting_below": 10},
+                     "mask_iou": args.near10_mask_iou, "review_box_iou": args.near10_review_box_iou,
+                     "small_sample_reporting_below": 10},
     })
 
 

@@ -167,6 +167,8 @@ def add_input_arguments(parser):
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--near10-prefilter-m", type=float, default=15.)
     parser.add_argument("--near10-mask-iou", type=float, default=.60)
+    parser.add_argument("--near10-review-box-iou", type=float,
+                        help="allow Mask review at this bilateral IoU even if box disparities disagree")
     parser.add_argument("--output", type=Path, required=True)
 
 
@@ -210,7 +212,8 @@ def main():
     evidence = source_info(ROOT, __file__, args.openstereo_source, args.weights)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
         near10_mode=args.near10_policy if args.calibration_zip else None,
-        near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou)
+        near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
+        near10_review_box_iou=args.near10_review_box_iou)
     dataset = validation_dataset(args.dataset_root, args.split_json, bundle, load_images=False)
     if args.calibration_zip:
         with ZipFile(args.calibration_zip) as archive:
@@ -252,6 +255,7 @@ def main():
         "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
         "calibration_sha256": digest(args.calibration_zip) if args.calibration_zip else None,
         "prefilter_m": args.near10_prefilter_m, "mask_iou": args.near10_mask_iou,
+        "review_box_iou": args.near10_review_box_iou,
     }
     write_json(args.output, report)
 

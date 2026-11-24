@@ -54,6 +54,22 @@ class Near10Test(unittest.TestCase):
         geometry = near10_geometry(pairs, (100, 100), (390., 0.), Near10Policy("range", 1))
         self.assertEqual(pairs.indices[geometry.admitted].tolist(), [101, 102])
 
+    def test_strong_bilateral_overlap_can_trigger_mask_review_despite_box_disparity_gap(self):
+        from lightbackbone_stereo_yolo.roi_selection import Near10Policy, near10_conflicts, near10_keep
+        pairs = self.pairs([[100, 10, 200, 50, 40, 140], [100, 10, 200, 50, 60, 160]])
+        disparity = torch.tensor([60., 40.])
+        default = Near10Policy("range-dedup", 1)
+        review = Near10Policy("range-dedup", 1, review_box_iou=.45)
+        self.assertFalse(near10_conflicts(pairs, disparity, default).any())
+        conflicts = near10_conflicts(pairs, disparity, review)
+        masks = torch.ones(2, 4, 4, dtype=torch.bool)
+        self.assertEqual(pairs.indices[near10_keep(pairs, conflicts, masks, review)].tolist(), [101])
+        masks[0, :2] = False
+        masks[1, 2:] = False
+        self.assertEqual(pairs.indices[near10_keep(pairs, conflicts, masks, review)].tolist(), [101, 102])
+        separate = self.pairs([[100, 10, 200, 50, 0, 25], [100, 10, 200, 50, 50, 75]])
+        self.assertFalse(near10_conflicts(separate, torch.tensor([137.5, 87.5]), review).any())
+
     def test_measured_ten_meter_boundary_and_unknown(self):
         from lightbackbone_stereo_yolo.roi_selection import near10_measure
         disparity = torch.tensor([[[40., 40.]], [[39., 39.]], [[38., 38.]], [[40., 40.]]])

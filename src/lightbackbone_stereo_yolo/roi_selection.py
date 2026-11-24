@@ -1,4 +1,6 @@
 """Opt-in Car RoI budget and foreground duplicate selection before local disparity."""
+from __future__ import annotations
+
 from dataclasses import dataclass, fields, replace
 from types import SimpleNamespace
 import math
@@ -48,12 +50,15 @@ class Near10Policy:
     car_class: int
     prefilter_m: float = 15.
     mask_iou: float = .60
+    review_box_iou: float | None = None
 
     def __post_init__(self):
         if self.mode not in ("baseline", "range", "range-dedup"):
             raise ValueError("invalid 10 m policy")
         if not 10 <= self.prefilter_m < math.inf or not 0 < self.mask_iou <= 1:
             raise ValueError("invalid 10 m prefilter distance or Mask IoU")
+        if self.review_box_iou is not None and not .35 <= self.review_box_iou <= 1:
+            raise ValueError("review Box IoU must be between .35 and 1")
 
 
 @dataclass(frozen=True)
@@ -106,8 +111,12 @@ def near10_conflicts(pairs, disparity, policy):
     geometry = ((left_iou >= .35) & (right_iou >= .35)) | contained
     tolerance = (.10 * torch.minimum(disparity[:, None], disparity)).clamp_min(2.)
     close = (disparity[:, None] - disparity).abs() <= tolerance
+    eligible = geometry & close
+    if policy.review_box_iou is not None:
+        # Permit Mask review despite unreliable box centers only with bilateral overlap.
+        eligible |= (left_iou >= policy.review_box_iou) & (right_iou >= policy.review_box_iou)
     car = pairs.classes == policy.car_class
-    return priority & geometry & close & car[:, None] & car
+    return priority & eligible & car[:, None] & car
 
 
 def near10_keep(pairs, conflicts, masks, policy):

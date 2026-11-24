@@ -45,7 +45,8 @@ def resolve_mask_threshold(bundle, override=None):
 def load_published_model(weights, openstereo_source, device, *, score=.40, topk=500,
                          apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None, roi_max_distance=None,
                          bf_px_m=None, cx_delta_px=None, crop_top_px=0, containment_threshold=None,
-                         near10_mode=None, near10_prefilter_m=15., near10_mask_iou=.60):
+                         near10_mode=None, near10_prefilter_m=15., near10_mask_iou=.60,
+                         near10_review_box_iou=None):
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
@@ -73,7 +74,8 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
         mask_threshold=resolve_mask_threshold(bundle, mask_threshold), roi_selection=selection,
         crop_top_px=crop_top_px, containment_threshold=containment_threshold,
         near10_policy=(Near10Policy(near10_mode, bundle["class_mapping"][26],
-                                   near10_prefilter_m, near10_mask_iou) if near10_mode is not None else None),
+                                   near10_prefilter_m, near10_mask_iou, near10_review_box_iou)
+                       if near10_mode is not None else None),
     )
     model.load_state_dict(bundle["model"], strict=True)
     return model.to(device).eval(), bundle
@@ -98,6 +100,8 @@ def main() -> None:
                         help="baseline measures 10 m without prefiltering")
     parser.add_argument("--near10-prefilter-m", type=float, default=15.)
     parser.add_argument("--near10-mask-iou", type=float, default=.60)
+    parser.add_argument("--near10-review-box-iou", type=float,
+                        help="allow Mask review at this bilateral IoU even if box disparities disagree")
     parser.add_argument("--bf-px-m", type=float, help="fB from this stereo frame calibration")
     parser.add_argument("--cx-delta-px", type=float, help="left cx minus right cx in pixels")
     parser.add_argument("--output", type=Path, required=True)
@@ -127,6 +131,7 @@ def main() -> None:
         crop_top_px=args.crop_top_px,
         containment_threshold=args.containment_threshold if args.containment_suppression else None,
         near10_mode=near10_mode, near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
+        near10_review_box_iou=args.near10_review_box_iou,
     )
     if not model.foreground_class_indices:
         warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",
