@@ -13,6 +13,7 @@ from .detection import (
     ContainmentEvent, PairDetections, StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions,
     generate_grid_anchors, suppress_contained_pairs,
 )
+from .stereo_input import StereoInputGeometry
 
 
 def restore_box_rows(boxes: Tensor, crop_top_px: int) -> Tensor:
@@ -195,30 +196,42 @@ class StereoYoloLocalModel(nn.Module):
         self.roi_selection = roi_selection
 
     def forward(
-        self, left: Tensor, right: Tensor, *, replay_pairs: PairDetections | None = None,
+        self, left: Tensor, right: Tensor, *, replay_pairs: PairDetections | None = None, route=None,
     ) -> StereoYoloLocalOutput:
-        if left.shape[0] != 1:
-            raise ValueError("baseline inference currently accepts one stereo pair per call")
-        crop_top_px = self.crop_top_px
-        if crop_top_px >= left.shape[-2]:
-            raise ValueError("crop_top_px must be less than image height")
-        if crop_top_px:
-            if left.shape != right.shape:
-                raise ValueError("left and right must be equal-shape NCHW image tensors")
-            pyramid = self.encoder(left[..., crop_top_px:, :], right[..., crop_top_px:, :])
-        else:
-            pyramid = self.encoder(left, right)
+        if left.ndim != 4 or left.shape != right.shape or left.shape[:2] != (1, 3):
+            raise ValueError(f"expected equal single-pair RGB NCHW inputs, actual {left.shape}, {right.shape}")
+        geometry = StereoInputGeometry(tuple(left.shape[-2:]), self.crop_top_px)
+        crop = geometry.crop_top_px
+        return self.forward_prepared(left[..., crop:, :], right[..., crop:, :], geometry,
+                                     replay_pairs=replay_pairs, route=route)
+
+    def forward_prepared(self, left, right, geometry: StereoInputGeometry, *, replay_pairs=None, route=None):
+        """Run the shared encoder on the already-cropped pair."""
+        self._validate_prepared(left, geometry, right)
+        pyramid = self.encoder(left, right)
         dense = self.detector(pyramid)
-        return self.decode_and_refine(left, pyramid, dense, replay_pairs=replay_pairs)
+        return self.decode_and_refine(left, pyramid, dense, input_geometry=geometry, replay_pairs=replay_pairs,
+                                      route=route)
+
+    def _validate_prepared(self, reference, geometry, right=None):
+        geometry.validate_prepared(reference, right)
+        if geometry.crop_top_px != self.crop_top_px:
+            raise ValueError(f"expected crop_top_px {self.crop_top_px}, actual {geometry.crop_top_px}")
 
     def decode_and_refine(
-        self, left: Tensor, pyramid: object, dense: object, *, replay_pairs: PairDetections | None = None,
+        self, left: Tensor, pyramid: object, dense: object, *, input_geometry: StereoInputGeometry,
+        replay_pairs: PairDetections | None = None, route=None,
     ) -> StereoYoloLocalOutput:
         """Decode frontend tensors and run native RoI heads in cropped coordinates."""
-        image_hw = tuple(left.shape[-2:])
-        crop_top_px = self.crop_top_px
-        cropped_hw = (image_hw[0] - crop_top_px, image_hw[1])
-        encoder_padded_hw = getattr(getattr(pyramid, "metadata", None), "padded_size", None)
+        self._validate_prepared(left, input_geometry)
+        image_hw = input_geometry.original_hw
+        crop_top_px = input_geometry.crop_top_px
+        cropped_hw = input_geometry.cropped_hw
+        padding = getattr(pyramid, "metadata", None)
+        encoder_padded_hw = getattr(padding, "padded_size", None)
+        if encoder_padded_hw is not None and (
+                encoder_padded_hw != input_geometry.padded_hw or getattr(padding, "original_size", cropped_hw) != cropped_hw):
+            raise ValueError(f"expected frontend geometry {input_geometry.as_dict()}, actual {padding}")
         if replay_pairs is not None:
             if self.roi_selection is not None or self.containment_threshold is not None:
                 raise ValueError("fixed RoI replay requires ordinary instance dispatch")
@@ -232,6 +245,7 @@ class StereoYoloLocalModel(nn.Module):
                 apply_nms=(not getattr(self.detector, "one_to_one_enabled", False)
                            if self.apply_paired_nms is None else self.apply_paired_nms),
                 class_aware_nms=True,
+                route=route,
             )
         elif self.detector_variant == "baseline":
             levels = (
@@ -257,6 +271,8 @@ class StereoYoloLocalModel(nn.Module):
             if crop_top_px:
                 left_only = replace(left_only, boxes=restore_box_rows(left_only.boxes, crop_top_px))
         if pair.boxes6.numel() == 0:
+            if route is not None:
+                route["idisp"] = pair
             empty = left.new_empty((0,))
             empty_ids = left.new_empty((0,), dtype=torch.long)
             empty_boxes = left.new_empty((0, 4))
@@ -278,6 +294,8 @@ class StereoYoloLocalModel(nn.Module):
         else:
             pair, instance = self.instance_head.forward_selected(
                 pyramid, pair, *cropped_hw, self.mask_threshold, **roi_options)
+        if route is not None:
+            route["idisp"] = pair
         boxes_left = pair.boxes6[:, :4]
         boxes_right = torch.stack((pair.boxes6[:, 4], pair.boxes6[:, 1], pair.boxes6[:, 5], pair.boxes6[:, 3]), 1)
         foreground = torch.zeros_like(instance.validity)

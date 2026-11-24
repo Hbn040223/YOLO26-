@@ -9,9 +9,10 @@ import torch
 
 from benchmark_edge_acceleration import revision, summarize, synchronize
 from evaluate_paired_nms import sha256, validation_dataset, write_json
-from infer import ROOT, load_published_model, normalized_rgb
+from infer import ROOT, load_published_model
 from lightbackbone_stereo_yolo.detection import PairDetections
 from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_v3small
+from lightbackbone_stereo_yolo.stereo_input import load_rectified_pair
 
 
 def frozen_load(pairs, count):
@@ -74,13 +75,11 @@ def main():
     normal = bundle["normalization"]
     rows = []
     for frame, record in enumerate(records):
-        left, right = (normalized_rgb(path, normal["mean"], normal["std"])[None].to(device)
-                       for path in (record.left_image, record.right_image))
+        left, right, geometry = load_rectified_pair(record.left_image, record.right_image, normal, args.crop_top_px)
+        left, right = left.to(device), right.to(device)
         model.encoder = encoders["B0_V2"]
-        baseline = model(left, right)
+        baseline = model.forward_prepared(left, right, geometry)
         pairs = device_pairs(baseline)
-        crop = args.crop_top_px
-        cropped = (left[..., crop:, :], right[..., crop:, :])
         for load, count in (("observed_c0", None), ("pairs_6", 6), ("pairs_9", 9), ("pairs_50", 50)):
             replay = frozen_load(pairs, count)
             if count is not None and not len(replay.indices):
@@ -94,8 +93,9 @@ def main():
                 for arm in order:
                     encoder = encoders[arm]
                     model.encoder = encoder
-                    forward_ms, output = elapsed(device, lambda: model(left, right, replay_pairs=replay))
-                    encoder_ms, _ = elapsed(device, lambda: encoder(*cropped))
+                    forward_ms, output = elapsed(device, lambda: model.forward_prepared(left, right, geometry,
+                                                                                       replay_pairs=replay))
+                    encoder_ms, _ = elapsed(device, lambda: encoder(left, right))
                     if not torch.equal(output.pair_ids, replay.indices):
                         raise RuntimeError(f"{record.frame_id}: {arm} changed the replay pair IDs")
                     row[arm] = {"forward_ms": forward_ms, "encoder_ms": encoder_ms, "pairs": len(output.pair_ids)}
@@ -105,7 +105,7 @@ def main():
         "commit": revision(ROOT), "openstereo_commit": revision(args.openstereo_source),
         "weights_sha256": sha256(args.weights), "split_sha256": sha256(args.split_json),
         "device": str(device), "device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU",
-        "power_mode": args.power_mode, "crop_top_px": args.crop_top_px, "seed": args.seed,
+        "power_mode": args.power_mode, "crop_top_px": args.crop_top_px, "seed": args.seed, "input_path": "prepared",
         "v3_pretrained_blocks": args.pretrained_v3,
         "v3_initialization": "V3-specific blocks, fresh FPN and adapters, original detector and instance weights",
         "replay_boundary": "after dense head, before decode and RoI dispatch; decode and NMS omitted in both arms",

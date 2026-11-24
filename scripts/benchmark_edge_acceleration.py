@@ -11,8 +11,10 @@ from unittest.mock import patch
 import torch
 
 from evaluate_paired_nms import sha256, validation_dataset, write_json
-from infer import ROOT, load_published_model, normalized_rgb
+from infer import ROOT, load_published_model
+from edge_run_evidence import source_info
 from lightbackbone_stereo_yolo import model as inference_model
+from lightbackbone_stereo_yolo.stereo_input import load_rectified_pair
 
 
 CONFIGURATIONS = {
@@ -31,7 +33,7 @@ def synchronize(device):
         torch.cuda.synchronize(device)
 
 
-def profile_forward(model, left, right, device):
+def profile_forward(model, left, right, device, geometry=None):
     """Measure synchronized stage boundaries independently of the latency runs."""
     marks = {}
 
@@ -64,7 +66,10 @@ def profile_forward(model, left, right, device):
         ):
             boundary(stack, module, name, before=before)
         stack.enter_context(patch.object(inference_model, "suppress_contained_pairs", pair_suppression))
-        model(left, right)
+        if geometry is None:
+            model(left, right)
+        else:
+            model.forward_prepared(left, right, geometry)
         stamp("output_end")
 
     def elapsed(start, end):
@@ -84,19 +89,21 @@ def profile_forward(model, left, right, device):
     }
 
 
-def measure(model, record, normalization, device):
+def measure(model, record, normalization, device, input_path="prepared"):
     """Time file decode through host outputs, and separately model forward."""
     synchronize(device)
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     start = perf_counter()
-    images = [normalized_rgb(path, normalization["mean"], normalization["std"])[None]
-              for path in (record.left_image, record.right_image)]
+    input_timings = {}
+    crop = model.crop_top_px if input_path == "prepared" else 0
+    left, right, geometry = load_rectified_pair(record.left_image, record.right_image, normalization, crop,
+                                               timings=input_timings)
     decoded = perf_counter()
-    left, right = (image.to(device) for image in images)
+    left, right = left.to(device), right.to(device)
     synchronize(device)
     on_device = perf_counter()
-    output = model(left, right)
+    output = (model.forward_prepared(left, right, geometry) if input_path == "prepared" else model(left, right))
     synchronize(device)
     forward_done = perf_counter()
     for tensor in (output.boxes_left, output.boxes_right, output.pair_ids, output.scores, output.classes,
@@ -110,6 +117,8 @@ def measure(model, record, normalization, device):
     end = perf_counter()
     return {
         "image_hw": output.image_hw, "encoder_padded_hw": output.encoder_padded_hw,
+        "cropped_hw": (output.image_hw[0] - output.crop_top_px, output.image_hw[1]),
+        **input_timings,
         "pairs": len(output.pair_ids), "preprocess_ms": (decoded - start) * 1000,
         "h2d_ms": (on_device - decoded) * 1000, "forward_ms": (forward_done - on_device) * 1000,
         "output_d2h_ms": (end - forward_done) * 1000, "end_to_end_ms": (end - start) * 1000,
@@ -134,6 +143,28 @@ def summarize(rows):
     return result
 
 
+def bootstrap_p95_differences(timings, arms):
+    """Resample paired frames, carrying every repetition into each draw."""
+    by_frame = {}
+    for row in timings:
+        by_frame.setdefault(row["frame_id"], []).append([row[arm]["end_to_end_ms"] for arm in arms])
+    data = torch.tensor(list(by_frame.values()), dtype=torch.float64)
+    count = len(data)
+    if count < 2:
+        return {}
+    generator = torch.Generator().manual_seed(17)
+    draws = torch.randint(count, (2000, count), generator=generator)
+    resampled = data[draws].flatten(1, 2)
+    tail = torch.quantile(resampled, .95, dim=1)
+    observed = torch.quantile(data.flatten(0, 1), .95, dim=0)
+    return {
+        arm: {"p95_difference_ms": float(observed[i] - observed[0]),
+              "ci95_ms": torch.quantile(tail[:, i] - tail[:, 0], tail.new_tensor([.025, .975])).tolist(),
+              "frames": count, "bootstrap_draws": len(draws)}
+        for i, arm in enumerate(arms) if i
+    }
+
+
 @torch.inference_mode()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -147,6 +178,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--profile", action="store_true", help="run synchronized profiling after timing")
+    parser.add_argument("--input-path", choices=("prepared", "model"), default="prepared")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.repeats < 1 or args.warmup < 0:
@@ -164,7 +196,7 @@ def main():
     for _ in range(args.warmup):
         for arm, setting in settings.items():
             configure(model, setting)
-            measure(model, records[0], bundle["normalization"], device)
+            measure(model, records[0], bundle["normalization"], device, args.input_path)
     timings = []
     for frame, record in enumerate(records):
         for repeat in range(args.repeats):
@@ -172,23 +204,24 @@ def main():
             row = {"frame_id": record.frame_id, "repeat": repeat}
             for arm in arms[offset:] + arms[:offset]:
                 configure(model, settings[arm])
-                row[arm] = measure(model, record, bundle["normalization"], device)
+                row[arm] = measure(model, record, bundle["normalization"], device, args.input_path)
             timings.append(row)
     profiles = []
     if args.profile:
         for record in records:
             normalization = bundle["normalization"]
-            left, right = (normalized_rgb(path, normalization["mean"], normalization["std"])[None].to(device)
-                           for path in (record.left_image, record.right_image))
             row = {"frame_id": record.frame_id}
             for arm, setting in settings.items():
                 configure(model, setting)
-                row[arm] = profile_forward(model, left, right, device)
+                crop = model.crop_top_px if args.input_path == "prepared" else 0
+                left, right, geometry = load_rectified_pair(record.left_image, record.right_image, normalization, crop)
+                row[arm] = profile_forward(model, left.to(device), right.to(device), device,
+                                           geometry if args.input_path == "prepared" else None)
             profiles.append(row)
     write_json(args.output, {
         "commit": revision(ROOT), "openstereo_commit": revision(args.openstereo_source),
         "weight_sha256": sha256(args.weights), "split_sha256": sha256(args.split_json),
-        "settings": settings, "torch_version": str(torch.__version__), "device": str(device),
+        "settings": settings, "input_path": args.input_path, "torch_version": str(torch.__version__), "device": str(device),
         "device_name": torch.cuda.get_device_name(device) if device.type == "cuda" else "CPU",
         "power_mode": args.power_mode, "precision": str(next(model.parameters()).dtype),
         "score": model.score_threshold, "topk": model.pre_nms_topk, "paired_nms_iou": model.paired_nms_iou,
@@ -198,7 +231,9 @@ def main():
         "foreground_class_indices": model.foreground_class_indices,
         "warmup": args.warmup, "timings": timings, "profiles": profiles,
         "summary": {arm: summarize([row[arm] for row in timings]) for arm in arms},
+        "end_to_end_p95_paired_frame_bootstrap": bootstrap_p95_differences(timings, arms),
         "profile_summary": {arm: summarize([row[arm] for row in profiles]) for arm in arms} if profiles else {},
+        "runtime_source": source_info(ROOT, __file__, args.openstereo_source, args.weights),
     })
 
 

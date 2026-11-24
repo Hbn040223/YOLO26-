@@ -36,11 +36,11 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def validation_dataset(dataset_root, split_json, bundle):
+def validation_dataset(dataset_root, split_json, bundle, *, load_images=True):
     normalization = bundle["normalization"]
     return KittiFrameDataset(
         build_frame_records(dataset_root, split_json, require_files=True), bundle["class_mapping"],
-        mean=normalization["mean"], std=normalization["std"], unknown_class="skip",
+        mean=normalization["mean"], std=normalization["std"], unknown_class="skip", load_images=load_images,
     )
 
 

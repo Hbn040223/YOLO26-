@@ -17,8 +17,9 @@ import torch
 from benchmark_edge_acceleration import revision
 from evaluate_paired_nms import sha256, write_json
 from infer import ROOT, load_published_model
-from lightbackbone_stereo_yolo.edge_deployment import FRONTEND_OUTPUTS, StaticStereoFrontend
-from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder
+from lightbackbone_stereo_yolo.edge_deployment import FRONTEND_OUTPUTS, FRONTEND_SCHEMA, StaticStereoFrontend
+from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_v3small
+from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry
 
 
 def build_engines(trtexec, onnx):
@@ -53,6 +54,8 @@ def main():
     parser.add_argument("--height", type=int, default=375, help="original image height")
     parser.add_argument("--width", type=int, default=1242)
     parser.add_argument("--crop-top-px", type=int, default=0)
+    parser.add_argument("--backbone", choices=("v2", "v3-small"), default="v2")
+    parser.add_argument("--seed", type=int, default=17, help="seed for the unadapted V3-Small prototype")
     parser.add_argument("--trtexec", help="build FP32 and FP16 engines with this TensorRT 8.6–10.x executable")
     parser.add_argument("--output", type=Path, required=True, help="static .onnx file")
     args = parser.parse_args()
@@ -61,22 +64,31 @@ def main():
     if onnx is None:
         parser.error(f"the onnx package could not be loaded: {ONNX_IMPORT_ERROR}")
     torch.set_num_threads(2)
-    hw = (args.height - args.crop_top_px, args.width)
-    padded_hw = LightStereoFeatureEncoder._padded_size(*hw)
+    torch.manual_seed(args.seed)
+    geometry = StereoInputGeometry((args.height, args.width), args.crop_top_px)
     model, bundle = load_published_model(args.weights, args.openstereo_source, "cpu")
+    if args.backbone == "v3-small":
+        model.encoder = LightStereoFeatureEncoder(build_lightstereo_v3small(args.openstereo_source),
+                                                 bundle["config"]["adapter_channels"]).eval()
     frontend = StaticStereoFrontend(model.encoder, model.detector).eval()
-    pair = (torch.zeros(1, 3, *hw), torch.zeros(1, 3, *hw))
+    pair = (torch.zeros(geometry.cropped_nchw), torch.zeros(geometry.cropped_nchw))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     torch.onnx.export(
         frontend, pair, str(args.output), input_names=("left", "right"), output_names=FRONTEND_OUTPUTS,
         opset_version=17,
     )
     onnx.checker.check_model(str(args.output))
+    bindings = {node.name: [d.dim_value for d in node.type.tensor_type.shape.dim]
+                for node in onnx.load(str(args.output)).graph.input}
+    expected = {name: list(geometry.cropped_nchw) for name in ("left", "right")}
+    if bindings != expected:
+        raise RuntimeError(f"expected ONNX bindings {expected}, actual {bindings}")
     write_json(args.output.with_suffix(".json"), {
         "commit": revision(ROOT), "openstereo_commit": revision(args.openstereo_source),
         "weights_sha256": sha256(args.weights), "onnx_sha256": sha256(args.output),
         "class_mapping": bundle["class_mapping"], "normalization": bundle["normalization"],
-        "original_hw": [args.height, args.width], "input_hw": hw, "encoder_padded_hw": padded_hw,
+        "original_hw": geometry.original_hw, "input_hw": geometry.cropped_hw, "encoder_padded_hw": geometry.padded_hw,
+        "bindings": bindings, "frontend_schema": FRONTEND_SCHEMA, "backbone": args.backbone, "seed": args.seed,
         "crop_top_px": args.crop_top_px, "outputs": FRONTEND_OUTPUTS, "opset": 17,
         "engines": build_engines(args.trtexec, args.output) if args.trtexec else {},
     })

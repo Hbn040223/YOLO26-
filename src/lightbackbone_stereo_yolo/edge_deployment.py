@@ -5,11 +5,25 @@ from torch import nn
 
 from .detection import DenseStereoPredictions
 from .lightstereo_encoder import PaddingMetadata
+from .stereo_input import StereoInputGeometry
 
 
 DENSE_OUTPUTS = ("objectness", "class_logits", "box6")
 FEATURE_OUTPUTS = ("p2_left", "p2_right", "p3_left", "p4_left", "c5_left")
 FRONTEND_OUTPUTS = DENSE_OUTPUTS + FEATURE_OUTPUTS
+FRONTEND_SCHEMA = 2
+
+
+def manifest_geometry(manifest):
+    if manifest.get("frontend_schema") != FRONTEND_SCHEMA:
+        raise ValueError(f"expected frontend schema {FRONTEND_SCHEMA}, actual {manifest.get('frontend_schema')}")
+    geometry = StereoInputGeometry(tuple(manifest["original_hw"]), manifest["crop_top_px"])
+    expected = {"input_hw": list(geometry.cropped_hw), "encoder_padded_hw": list(geometry.padded_hw),
+                "bindings": {name: list(geometry.cropped_nchw) for name in ("left", "right")}}
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            raise ValueError(f"expected manifest {key} {value}, actual {manifest.get(key)}")
+    return geometry
 
 
 class StaticStereoFrontend(nn.Module):

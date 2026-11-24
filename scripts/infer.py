@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
+import json
 import math
 from pathlib import Path
 import sys
@@ -19,6 +21,8 @@ from lightbackbone_stereo_yolo.mask import mask_logit_cutoff
 from lightbackbone_stereo_yolo.roi_selection import RoiPairSelection
 from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead, StereoYoloLocalModel
 from lightbackbone_stereo_yolo.stereo_yolo26 import StereoYOLO26PanHead
+from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry, load_rectified_pair
+from edge_run_evidence import capture_route, serialize_route, source_info
 
 
 def resolve_mask_threshold(bundle, override=None):
@@ -90,9 +94,16 @@ def main() -> None:
     parser.add_argument("--bf-px-m", type=float, help="fB from this stereo frame calibration")
     parser.add_argument("--cx-delta-px", type=float, help="left cx minus right cx in pixels")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--input-path", choices=("prepared", "model"), default="prepared")
+    parser.add_argument("--trace-json", type=Path, help="record loaded source, Backbone shape and NMS/iDisp pair IDs")
+    parser.add_argument("--expect-commit", help="fail before inference if this commit is not checked out")
     args = parser.parse_args()
     if args.containment_suppression and not args.paired_nms:
         parser.error("--containment-suppression requires --paired-nms")
+    evidence = source_info(ROOT, __file__, args.openstereo_source, args.weights) if (
+        args.trace_json or args.expect_commit) else None
+    if args.expect_commit and evidence["commit"] != args.expect_commit:
+        parser.error(f"expected commit {args.expect_commit}, actual {evidence['commit']}")
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     torch.backends.cudnn.deterministic = True
@@ -109,12 +120,15 @@ def main() -> None:
         warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",
                       stacklevel=2)
     normalization = bundle["normalization"]
-    left, right = (
-        normalized_rgb(path, normalization["mean"], normalization["std"])[None].to(args.device)
-        for path in (args.left, args.right)
-    )
+    timings = {}
+    cpu_crop = args.crop_top_px if args.input_path == "prepared" else 0
+    left, right, decoded_geometry = load_rectified_pair(args.left, args.right, normalization, cpu_crop, timings=timings)
+    geometry = StereoInputGeometry(decoded_geometry.original_hw, args.crop_top_px)
+    left, right = left.to(args.device), right.to(args.device)
     with torch.inference_mode():
-        result = model(left, right)
+        with capture_route(model) if args.trace_json else nullcontext() as route:
+            result = (model.forward_prepared(left, right, geometry, route=route) if args.input_path == "prepared"
+                      else model(left, right, route=route))
         arrays = {name: getattr(result, name).cpu().numpy() for name in (
             "boxes_left", "boxes_right", "scores", "classes", "disparity", "validity", "mask_validity",
             "pair_ids", "foreground_validity",
@@ -140,6 +154,8 @@ def main() -> None:
     arrays["image_hw"] = np.asarray(result.image_hw)
     arrays["crop_top_px"] = np.asarray(result.crop_top_px)
     arrays["encoder_padded_hw"] = np.asarray(result.encoder_padded_hw, dtype=np.int64)
+    arrays["cropped_hw"] = np.asarray(geometry.cropped_hw)
+    arrays["input_path"] = np.asarray(args.input_path)
     arrays["containment_pair_ids"] = np.asarray(
         [(event.suppressor_id, event.suppressed_id) for event in result.containment_events], dtype=np.int64,
     ).reshape(-1, 2)
@@ -149,6 +165,15 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("wb") as handle:
         np.savez_compressed(handle, **arrays)
+    if args.trace_json:
+        args.trace_json.parent.mkdir(parents=True, exist_ok=True)
+        args.trace_json.write_text(json.dumps({
+            **evidence, **geometry.as_dict(), "input_path": args.input_path,
+            "input_nchw": list(left.shape), "device": args.device,
+            "detector_variant": model.detector_variant, "score": model.score_threshold, "topk": model.pre_nms_topk,
+            "paired_nms_iou": model.paired_nms_iou, "containment_threshold": model.containment_threshold,
+            "roi_sampling": model.instance_head.roi_sampling, **serialize_route(route), **timings,
+        }, indent=2) + "\n", encoding="utf-8")
     print(f"{len(result.scores)} paired detections, disparity shape {tuple(result.disparity.shape)}")
     if result.left_only is not None:
         print(f"{len(result.left_only.ids)} left-only detections with unknown distance")

@@ -14,11 +14,13 @@ import torch
 from benchmark_edge_acceleration import revision, summarize, synchronize
 from benchmark_edge_backbone import device_pairs, elapsed
 from evaluate_paired_nms import sha256, write_json
-from infer import ROOT, load_published_model, normalized_rgb
+from infer import ROOT, load_published_model
 from lightbackbone_stereo_yolo import detection
 from lightbackbone_stereo_yolo.edge_deployment import (
-    FRONTEND_OUTPUTS, StaticStereoFrontend, unpack_frontend_outputs,
+    FRONTEND_OUTPUTS, StaticStereoFrontend, manifest_geometry, unpack_frontend_outputs,
 )
+from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_v3small
+from lightbackbone_stereo_yolo.stereo_input import load_rectified_pair
 
 
 class TensorRTFrontend:
@@ -37,6 +39,7 @@ class TensorRTFrontend:
         types = {trt.DataType.FLOAT: torch.float32, trt.DataType.HALF: torch.float16}
         names = {self.engine.get_tensor_name(i) for i in range(self.engine.num_io_tensors)}
         self.input_names = ("left", "right")
+        self.input_shape = tuple(input_shape)
         if names != set((*self.input_names, *FRONTEND_OUTPUTS)):
             raise RuntimeError(f"unexpected TensorRT I/O tensors in {path}")
         self.buffers = {}
@@ -45,14 +48,19 @@ class TensorRTFrontend:
             input_tensor = name in self.input_names
             expected_mode = trt.TensorIOMode.INPUT if input_tensor else trt.TensorIOMode.OUTPUT
             if (self.engine.get_tensor_mode(name) != expected_mode or self.engine.get_tensor_format(name) != trt.TensorFormat.LINEAR
-                    or min(shape) < 1 or (input_tensor and shape != input_shape)):
-                raise RuntimeError(f"unexpected format, mode or static shape for {name} in {path}")
+                    or min(shape) < 1 or (input_tensor and shape != self.input_shape)):
+                raise RuntimeError(f"expected {name} {expected_mode} linear, input NCHW {self.input_shape}, "
+                                   f"actual {shape}, {self.engine.get_tensor_mode(name)}, "
+                                   f"{self.engine.get_tensor_format(name)} in {path}")
             self.buffers[name] = torch.empty(shape, device=device, dtype=types[self.engine.get_tensor_dtype(name)])
             if not self.context.set_tensor_address(name, self.buffers[name].data_ptr()):
                 raise RuntimeError(f"TensorRT could not bind {name} in {path}")
         self.device = device
 
     def __call__(self, left, right):
+        actual = tuple(left.shape), tuple(right.shape)
+        if any(shape != self.input_shape for shape in actual):
+            raise ValueError(f"expected TensorRT NCHW {self.input_shape} in each view, actual {actual}")
         for name, tensor in zip(self.input_names, (left, right)):
             self.buffers[name].copy_(tensor)
         if not self.context.execute_async_v3(torch.cuda.current_stream(self.device).cuda_stream):
@@ -138,31 +146,42 @@ def main():
     if (manifest["weights_sha256"] != sha256(args.weights)
             or manifest["openstereo_commit"] != revision(args.openstereo_source)):
         parser.error("checkpoint or OpenStereo revision differs from the export manifest")
-    crop = manifest["crop_top_px"]
+    geometry = manifest_geometry(manifest)
+    crop = geometry.crop_top_px
+    torch.manual_seed(manifest["seed"])
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
                                          crop_top_px=crop)
+    if manifest["backbone"] not in ("v2", "v3-small"):
+        parser.error(f"unknown manifest backbone {manifest['backbone']!r}")
     normalization = bundle["normalization"]
-    left, right = (normalized_rgb(path, normalization["mean"], normalization["std"])[None].to(device)
-                   for path in (args.left, args.right))
-    if list(left.shape[-2:]) != manifest["original_hw"] or right.shape != left.shape:
-        parser.error("stereo dimensions must match the static manifest")
-    cropped = (left[..., crop:, :].contiguous(), right[..., crop:, :].contiguous())
+    left, right, actual_geometry = load_rectified_pair(args.left, args.right, normalization, crop)
+    if actual_geometry != geometry:
+        parser.error(f"expected stereo geometry {geometry.as_dict()}, actual {actual_geometry.as_dict()}")
+    cropped = (left.to(device).contiguous(), right.to(device).contiguous())
+    reference_result = model.forward_prepared(*cropped, geometry)
+    if manifest["backbone"] == "v3-small":
+        model.encoder = LightStereoFeatureEncoder(build_lightstereo_v3small(args.openstereo_source),
+                                                 bundle["config"]["adapter_channels"]).to(device).eval()
     frontends = {"pytorch_fp32": StaticStereoFrontend(model.encoder, model.detector).eval()}
+    engine_proof = {}
     for precision in ("fp32", "fp16"):
         built = manifest["engines"][precision]
         engine = args.manifest.parent / built["engine"]
         if sha256(engine) != built["sha256"]:
             raise RuntimeError(f"TensorRT engine failed checksum validation: {engine}")
         frontends[f"tensorrt_{precision}"] = TensorRTFrontend(trt, engine, device, tuple(cropped[0].shape))
+        engine_proof[precision] = {"sha256": built["sha256"],
+                                   "input_nchw": frontends[f"tensorrt_{precision}"].input_shape,
+                                   "path": str(engine.resolve())}
 
     def dispatch(tensors, replay=None):
         pyramid, dense = unpack_frontend_outputs(tensors, tuple(manifest["input_hw"]), tuple(manifest["encoder_padded_hw"]))
-        return model.decode_and_refine(left, pyramid, dense, replay_pairs=replay)
+        return model.decode_and_refine(cropped[0], pyramid, dense, input_geometry=geometry, replay_pairs=replay)
 
     reference = frontends["pytorch_fp32"](*cropped)
-    reference_result = model(left, right)
-    torch.testing.assert_close(dispatch(reference).pair_ids, reference_result.pair_ids, rtol=0, atol=0)
     replay = device_pairs(reference_result)
+    native_reference = model.forward_prepared(*cropped, geometry)
+    torch.testing.assert_close(dispatch(reference).pair_ids, native_reference.pair_ids, rtol=0, atol=0)
     numerical = {}
     for arm, frontend in frontends.items():
         tensors = frontend(*cropped)
@@ -170,7 +189,7 @@ def main():
         numerical[arm] = {
             "frontend_errors_against_pytorch": tensor_errors(reference, tensors),
             "native_pair_ids": selected.pair_ids.tolist(),
-            "native_ordered_ids_match_pytorch": torch.equal(selected.pair_ids, reference_result.pair_ids),
+            "native_ordered_ids_match_pytorch": torch.equal(selected.pair_ids, native_reference.pair_ids),
         }
 
     rows = []
@@ -199,6 +218,8 @@ def main():
         "commit": revision(ROOT), "export_manifest_sha256": sha256(args.manifest),
         "tensorrt_version": trt.__version__, "device_name": torch.cuda.get_device_name(device),
         "power_mode": args.power_mode, "encoder_padded_hw": manifest["encoder_padded_hw"], "crop_top_px": crop,
+        "backbone": manifest["backbone"], "input_path": "prepared", "input_geometry": geometry.as_dict(),
+        "engines": engine_proof,
         "matched_load_pair_ids": replay.indices.tolist(), "numerical": numerical,
         "summary": {arm: summarize([row[arm] for row in rows]) for arm in names}, "timings": rows,
         "native_stage_summary": {arm: summarize(values) for arm, values in profiles.items()},

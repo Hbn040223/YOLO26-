@@ -11,13 +11,16 @@ from zipfile import ZipFile
 import torch
 
 from benchmark_edge_acceleration import CONFIGURATIONS, configure, revision
+from edge_run_evidence import capture_route, serialize_route, source_info
 from diagnose_pred_roi import _target_groups
 from evaluate_paired_nms import sha256, validation_dataset, write_json
 from infer import ROOT, load_published_model
 from lightbackbone_stereo_yolo.detection import PairDetections, suppress_contained_pairs
+from lightbackbone_stereo_yolo.geometry import decode_anchorfree_boxes6, pair_boxes_to_lr
 from lightbackbone_stereo_yolo.idisp_ab import error_totals, original_foreground, project_disparity, summarize_error
 from lightbackbone_stereo_yolo.roi_selection import subset_crop
-from lightbackbone_stereo_yolo.training_metrics import greedy_match_paired_detections, paired_match_eligibility
+from lightbackbone_stereo_yolo.stereo_input import load_rectified_pair
+from lightbackbone_stereo_yolo.training_metrics import _pairwise_iou, greedy_match_paired_detections, paired_match_eligibility
 
 
 CLASSES = {24: "Pedestrian", 26: "Car", 27: "Truck", 28: "Bus"}
@@ -77,6 +80,52 @@ def containment_audit(baseline, trial, c0, c1, events, sample, iou, gt_ids):
     return [audit_row(event) for event in events]
 
 
+def loss_route(route, sample, gt_indices, crop, right_offset_mode):
+    if not gt_indices:
+        return {}
+    encoded, locations, scores, classes = route["dense"]
+    boxes = decode_anchorfree_boxes6(encoded, locations, right_offset_mode=right_offset_mode).cpu()
+    boxes[:, 1] += crop
+    boxes[:, 3] += crop
+    targets = sample["boxes6"][gt_indices]
+    left, right = pair_boxes_to_lr(boxes)
+    gt_left, gt_right = pair_boxes_to_lr(targets)
+    l_iou, r_iou = _pairwise_iou(left, gt_left), _pairwise_iou(right, gt_right)
+    valid = ((boxes.isfinite().all(1) & scores.cpu().isfinite())[:, None]
+             & (classes.cpu()[:, None] == sample["classes"][gt_indices]))
+    quality = torch.minimum(l_iou, r_iou).masked_fill(~valid, -1)
+    stage_ids = {stage: set(route[stage].indices.tolist()) for stage in ("pre_nms", "post_nms", "idisp")}
+    result = {}
+    for column, gt in enumerate(gt_indices):
+        if not valid[:, column].any():
+            result[gt] = None
+            continue
+        pair_id = int(quality[:, column].argmax())
+        result[gt] = {
+            "best_dense_pair_id": pair_id, "score": float(scores[pair_id]),
+            "left_iou": float(l_iou[pair_id, column]), "right_iou": float(r_iou[pair_id, column]),
+            **{stage: pair_id in ids for stage, ids in stage_ids.items()},
+        }
+    return result
+
+
+def foreground_evidence(output, pairs, events):
+    ids = sorted({event[key] for event in events for key in ("suppressor_id", "suppressed_id")})
+    by_id = {int(pair_id): index for index, pair_id in enumerate(pairs.indices)}
+    maps = projected(output, {pair_id: by_id[pair_id] for pair_id in ids}, None, foreground=True)
+    for event in events:
+        left, lv = maps[event["suppressor_id"]]
+        right, rv = maps[event["suppressed_id"]]
+        common, union = lv & rv, lv | rv
+        n_common, n_union = int(common.sum()), int(union.sum())
+        event["offline_foreground_evidence"] = {
+            "suppressor_valid_pixels": int(lv.sum()), "suppressed_valid_pixels": int(rv.sum()),
+            "common_pixels": n_common, "union_pixels": n_union,
+            "mask_iou": n_common / n_union if n_union else None,
+            "median_abs_disparity_difference_px": float((left[common] - right[common]).abs().median()) if n_common else None,
+        }
+
+
 def projected(output, matched, sample, *, foreground=False):
     if not matched:
         return {}
@@ -120,14 +169,14 @@ def reduce_pixel_metrics(rows):
 
 
 @torch.inference_mode()
-def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration):
+def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration, normalization, input_path):
     geometry = {(setting[1], name): {"gt": 0, "fully_cropped": [], "truncated": [],
                                     "near_crop_line": [], "review_gt_ids": []}
                 for setting in settings.values() if setting[1] for name in CLASSES.values()}
     classes = {index: CLASSES[raw] for raw, index in mapping.items() if raw in CLASSES}
     fg_class = mapping.get(26) if mapping.get(26) in model.foreground_class_indices else None
     frames = []
-    for sample in dataset:
+    for record, sample in zip(dataset.records, dataset):
         frame_id = sample["frame_id"]
         gt_ids = [f"{frame_id}:{i}" for i in range(len(sample["boxes6"]))]
         gt_classes = [classes[label] for label in sample["classes"].tolist()]
@@ -147,10 +196,9 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
                     if affected:
                         row[field].append(gt_ids[i])
 
-        left, right = (sample[side][None].to(device) for side in ("left", "right"))
         table = {"frame_id": frame_id, "gt_ids": gt_ids, "gt_classes": gt_classes,
                  "near_car_ids": [gt_ids[i] for i in sorted(near)], "arms": {}}
-        pairs, matches, rect_maps, fg_maps = {}, {}, {}, {}
+        pairs, matches, rect_maps, fg_maps, routes = {}, {}, {}, {}, {}
         truth, fg_support = original_foreground(sample, "cpu")
         rect_support = rectangular_support(sample)
         if fg_class is not None:
@@ -158,7 +206,15 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
             eligible_fg = fg_support.flatten(1).any(1)
         for arm, setting in settings.items():
             configure(model, setting)
-            result = model(left, right)
+            crop = model.crop_top_px if input_path == "prepared" else 0
+            left, right, geometry = load_rectified_pair(record.left_image, record.right_image, normalization, crop)
+            left, right = left.to(device), right.to(device)
+            with capture_route(model) as route:
+                result = (model.forward_prepared(left, right, geometry, route=route) if input_path == "prepared"
+                          else model(left, right, route=route))
+            routes[arm] = route
+            if arm == "C0":
+                c0_output = result
             pairs[arm] = make_pairs(result)
             matches[arm] = match(pairs[arm], sample, iou)
             rect_maps[arm] = projected(result, matches[arm], sample)
@@ -166,6 +222,10 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
                 fg_matches = {gt: p for gt, p in matches[arm].items() if eligible_fg[gt]}
                 fg_maps[arm] = projected(result, fg_matches, sample, foreground=True)
             table["arms"][arm] = {
+                "input_geometry": {"original_hw": result.image_hw,
+                                   "cropped_hw": (result.image_hw[0] - setting[1], result.image_hw[1]),
+                                   "crop_top_px": setting[1], "encoder_padded_hw": result.encoder_padded_hw},
+                "route": serialize_route(route),
                 "match_pair_ids_by_gt": {gt_ids[g]: int(pairs[arm].indices[p]) for g, p in matches[arm].items()},
                 "rectangular": disparity_scores(rect_maps[arm], truth, rect_support),
                 "car_foreground": None if fg_class is None else {
@@ -182,6 +242,8 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
                                       "pair_ids": pairs["C0"].indices.tolist()}
             table["suppression_events"] = containment_audit(
                 pairs["C0"], replay, matches["C0"], matches["C1"], events, sample, iou, gt_ids)
+            if fg_class is not None:
+                foreground_evidence(c0_output, pairs["C0"], table["suppression_events"])
 
         first = next(iter(settings))
         for arm in settings:
@@ -189,6 +251,13 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
             row = table["arms"][arm]
             row["newly_hit_gt_ids"] = [gt_ids[i] for i in sorted(seen - baseline)]
             row["lost_gt_ids"] = [gt_ids[i] for i in sorted(baseline - seen)]
+            if arm != first and baseline - seen:
+                lost = sorted(baseline - seen)
+                before = loss_route(routes[first], sample, lost, settings[first][1], model.right_offset_mode)
+                after = loss_route(routes[arm], sample, lost, settings[arm][1], model.right_offset_mode)
+                row["lost_gt_route"] = {
+                    gt_ids[g]: {"baseline": before[g], "trial": after[g],
+                                "baseline_matched_pair_id": int(pairs[first].indices[matches[first][g]])} for g in lost}
             cohorts = {name: {i for i, label in enumerate(gt_classes) if label == name}
                        for name in CLASSES.values()}
             if calibration is not None:
@@ -248,6 +317,7 @@ def main():
     parser.add_argument("--near-crop-line-px", type=int, required=True)
     parser.add_argument("--match-iou", type=float, default=.50)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--input-path", choices=("prepared", "model"), default="prepared")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.near_crop_line_px < 0 or not 0 < args.match_iou <= 1:
@@ -257,11 +327,11 @@ def main():
     torch.backends.cudnn.benchmark = False
     device = torch.device(args.device)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True)
-    dataset = validation_dataset(args.dataset_root, args.split_json, bundle)
+    dataset = validation_dataset(args.dataset_root, args.split_json, bundle, load_images=False)
     settings = CONFIGURATIONS[args.stage]
     with ZipFile(args.calibration_zip) if args.calibration_zip else nullcontext() as calibration:
         result = evaluate(model, dataset, settings, bundle["class_mapping"], device,
-                          args.match_iou, args.near_crop_line_px, calibration)
+                          args.match_iou, args.near_crop_line_px, calibration, bundle["normalization"], args.input_path)
     result["protocol"] = {
         "commit": revision(ROOT), "openstereo_commit": revision(args.openstereo_source),
         "weights_sha256": sha256(args.weights), "split_sha256": sha256(args.split_json),
@@ -270,7 +340,8 @@ def main():
         "foreground_class_indices": model.foreground_class_indices,
         "paired_match_iou": args.match_iou, "near_crop_line_px": args.near_crop_line_px,
         "near_car_distance_m_exclusive": 10 if args.calibration_zip else None,
-        "device": str(device), "settings": settings,
+        "device": str(device), "settings": settings, "input_path": args.input_path,
+        "runtime_source": source_info(ROOT, __file__, args.openstereo_source, args.weights),
     }
     write_json(args.output, result)
 

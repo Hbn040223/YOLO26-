@@ -14,6 +14,59 @@ from lightbackbone_stereo_yolo.model import StereoYoloLocalModel
 
 
 class EdgeAccelerationTest(unittest.TestCase):
+    def test_rgb_is_cropped_once_before_shared_backbone_for_all_deployment_shapes(self):
+        import numpy as np
+        from PIL import Image
+        from torch.nn import functional as F
+        from lightbackbone_stereo_yolo.detection import DenseStereoPredictions
+        from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder
+        from lightbackbone_stereo_yolo.stereo_input import prepare_rectified_images
+
+        class Backbone(nn.Module):
+            output_channels = (3, 3, 3, 3)
+
+            def forward(self, x):
+                return tuple(F.avg_pool2d(x, stride) for stride in (4, 8, 16, 32))
+
+        class Detector(nn.Module):
+            def forward(self, pyramid):
+                count = sum(getattr(pyramid, name).shape[-1] * getattr(pyramid, name).shape[-2]
+                            for name in ("p3_left", "p4_left", "c5_left"))
+                return DenseStereoPredictions(torch.full((1, count), -20.), torch.zeros(1, count, 2),
+                                              torch.zeros(1, count, 6))
+
+        rows = np.arange(375, dtype=np.int32)[:, None, None]
+        channels = np.array([1, 2, 3])[None, None, :]
+        left = np.broadcast_to((rows // channels) % 256, (375, 1242, 3)).astype(np.uint8)
+        right = 255 - left
+        normalization = {"mean": (0.2, 0.3, 0.4), "std": (0.5, 0.6, 0.7)}
+        backbone = Backbone()
+        model = StereoYoloLocalModel(LightStereoFeatureEncoder(backbone, 4), Detector(), nn.Identity(),
+                                     detector_variant="stereo_yolo26_pan", apply_paired_nms=True)
+        seen = []
+        hook = backbone.register_forward_pre_hook(lambda _, args: seen.append(args[0].clone()))
+        try:
+            with torch.inference_mode():
+                for crop, padded in ((0, 384), (64, 320), (96, 288), (128, 256)):
+                    model.crop_top_px = crop
+                    seen.clear()
+                    l, r, geometry = prepare_rectified_images(
+                        Image.fromarray(left), Image.fromarray(right), normalization, crop)
+                    result = model.forward_prepared(l, r, geometry)
+                    self.assertEqual(len(seen), 1)
+                    self.assertEqual(tuple(seen[0].shape), (2, 3, padded, 1248))
+                    self.assertEqual(result.image_hw, (375, 1242))
+                    self.assertEqual(result.pair_ids.numel(), 0)
+                    expected = torch.tensor(np.stack([left[crop:], right[crop:]])).permute(0, 3, 1, 2).float() / 255.
+                    expected = ((expected - torch.tensor(normalization["mean"])[None, :, None, None])
+                                / torch.tensor(normalization["std"])[None, :, None, None])
+                    torch.testing.assert_close(seen[0][..., :375-crop, :1242], expected, atol=0, rtol=0)
+                for wrong in (torch.zeros(1, 3, 375, 1242), l[..., 128:, :], l[:, :1]):
+                    with self.assertRaisesRegex(ValueError, "expected.*actual"):
+                        model.forward_prepared(wrong, r, geometry)
+        finally:
+            hook.remove()
+
     def test_native_nms_profiles_overlaps_transfer_and_greedy_without_changing_pair_ids(self):
         from lightbackbone_stereo_yolo.detection import paired_nms
 
@@ -160,7 +213,9 @@ class EdgeAccelerationTest(unittest.TestCase):
                 features = {f"{level}_{side}": torch.ones(1, 4, size, size)
                             for level, size in (("p2", 16), ("p3", 8), ("p4", 4), ("c5", 2))
                             for side in ("left", "right")}
-                return SimpleNamespace(**features, metadata=SimpleNamespace(padded_size=(64, 64)))
+                hw = tuple(left.shape[-2:])
+                return SimpleNamespace(**features, metadata=SimpleNamespace(
+                    original_size=hw, padded_size=tuple(size + (-size) % 32 for size in hw)))
 
         class Detector(nn.Module):
             one_to_one_enabled = True
@@ -193,6 +248,9 @@ class EdgeAccelerationTest(unittest.TestCase):
                 uncropped_one = model(left, right)
                 model.crop_top_px = 16
                 result = model(left, right)
+                from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry
+                prepared = model.forward_prepared(left[..., 16:, :], right[..., 16:, :],
+                                                   StereoInputGeometry((80, 64), 16))
         finally:
             hook.remove()
         torch.testing.assert_close(encoder.received[0], left[..., 16:, :])
@@ -204,4 +262,31 @@ class EdgeAccelerationTest(unittest.TestCase):
         torch.testing.assert_close(result.boxes_right, zero.boxes_right[:1] + torch.tensor([0., 16., 0., 16.]))
         torch.testing.assert_close(result.crop.y0, zero.crop.y0[:1] + 16)
         torch.testing.assert_close(result.disparity, uncropped_one.disparity)
+        for name in ("pair_ids", "boxes_left", "boxes_right", "disparity", "validity"):
+            torch.testing.assert_close(getattr(prepared, name), getattr(result, name), atol=0, rtol=0)
+        torch.testing.assert_close(prepared.crop.y0, result.crop.y0, atol=0, rtol=0)
         self.assertEqual(result.image_hw, (80, 64))
+
+    def test_manifest_rejects_previous_schema_and_mixed_nchw_bindings(self):
+        from lightbackbone_stereo_yolo.edge_deployment import FRONTEND_SCHEMA, manifest_geometry
+
+        manifest = {"frontend_schema": FRONTEND_SCHEMA, "crop_top_px": 128, "original_hw": [375, 1242],
+                    "input_hw": [247, 1242], "encoder_padded_hw": [256, 1248],
+                    "bindings": {name: [1, 3, 247, 1242] for name in ("left", "right")}}
+        self.assertEqual(manifest_geometry(manifest).cropped_nchw, (1, 3, 247, 1242))
+        with self.assertRaisesRegex(ValueError, "expected frontend schema"):
+            manifest_geometry({**manifest, "frontend_schema": 1})
+        for wrong in ([1, 3, 375, 1242], [1, 3, 119, 1242], [1, 1, 247, 1242]):
+            with self.assertRaisesRegex(ValueError, "expected manifest bindings.*actual"):
+                manifest_geometry({**manifest, "bindings": {**manifest["bindings"], "right": wrong}})
+
+    def test_tensorrt_runner_rejects_shape_before_using_buffers(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+        from benchmark_edge_tensorrt import TensorRTFrontend
+
+        runner = object.__new__(TensorRTFrontend)
+        runner.input_shape = (1, 3, 247, 1242)
+        prepared = torch.empty(runner.input_shape)
+        for actual in ((1, 3, 375, 1242), (1, 3, 119, 1242), (1, 1, 247, 1242)):
+            with self.assertRaisesRegex(ValueError, "expected TensorRT NCHW.*actual"):
+                runner(prepared, torch.empty(actual))

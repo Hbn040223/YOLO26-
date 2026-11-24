@@ -414,6 +414,7 @@ def decode_anchorfree_predictions(
     right_offset_mode: str = "legacy_clamp",
     apply_nms: bool = True,
     class_aware_nms: bool = True,
+    route=None,
 ) -> PairDetections:
     """Decode aligned stereo pairs, optionally applying pair-preserving NMS."""
     from .geometry import decode_anchorfree_boxes6
@@ -425,7 +426,10 @@ def decode_anchorfree_predictions(
     decoded = decode_anchorfree_boxes6(
         predictions["box6"].reshape(-1, 6)[chosen], locations[chosen], right_offset_mode=right_offset_mode,
     )
-    final, _ = suppress_anchorfree_candidates(
+    final, pre = suppress_anchorfree_candidates(
         decoded, chosen, scores, classes, nms_threshold, apply_nms=apply_nms, class_aware_nms=class_aware_nms,
     )
+    if route is not None:
+        route.update(pre_nms=pre, post_nms=final, apply_nms=apply_nms, class_aware_nms=class_aware_nms)
+        route["dense"] = (predictions["box6"].reshape(-1, 6), locations, scores, classes)
     return final

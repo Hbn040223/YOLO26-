@@ -19,6 +19,7 @@ from torch.utils.data import Dataset
 from .kitti import (
     KittiManifestRecord, RightProjection, assess_right_projection, build_kitti_manifest, project_valid_right_box,
 )
+from ..stereo_input import normalize_rgb
 
 
 # LightStereo KITTI config: NormalizeImage MEAN/STD.  The pretrained backbone was
@@ -73,11 +74,8 @@ def build_class_mapping(records: Iterable[KittiFrameRecord]) -> dict[int, int]:
 
 def normalized_rgb(path: Path, mean: tuple[float, float, float], std: tuple[float, float, float]) -> Tensor:
     """Load RGB and apply the exact LightStereo-KITTI normalization."""
-    array = np.asarray(Image.open(path).convert("RGB"), dtype=np.float32) / 255.
-    image = torch.from_numpy(array).permute(2, 0, 1)
-    mean_tensor = torch.tensor(mean, dtype=torch.float32)[:, None, None]
-    std_tensor = torch.tensor(std, dtype=torch.float32)[:, None, None]
-    return (image - mean_tensor) / std_tensor
+    with Image.open(path) as image:
+        return normalize_rgb(image, mean, std)
 
 
 def _paired_boxes(
