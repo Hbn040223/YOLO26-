@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import nullcontext
 from dataclasses import dataclass
 import numpy as np
 import torch
@@ -156,7 +157,7 @@ def detection_loss(predictions: dict[str, Tensor], targets: dict[str, Tensor]) -
 
 
 def paired_nms(
-    boxes6: Tensor, scores: Tensor, iou_threshold: float = .5, *, classes: Tensor | None = None,
+    boxes6: Tensor, scores: Tensor, iou_threshold: float = .5, *, classes: Tensor | None = None, profile=None,
 ) -> PairDetections:
     """Suppress one whole pair only when both views overlap above the threshold."""
     if not 0 <= iou_threshold <= 1:
@@ -165,6 +166,7 @@ def paired_nms(
     indices = order
     count = order.numel()
     if count > 1:
+        span = profile or nullcontext
         with torch.no_grad():
             sorted_boxes = boxes6[order]
             left = sorted_boxes[:, :4]
@@ -177,18 +179,21 @@ def paired_nms(
             rows_per_block = max(1, 1024**2 // count)
             for start in range(0, count, rows_per_block):
                 stop = min(start + rows_per_block, count)
-                paired_iou = torch.minimum(_iou(left[start:stop], left[start:]),
-                                           _iou(right[start:stop], right[start:]))
-                removes = ~(paired_iou <= iou_threshold)
-                if sorted_classes is not None:
-                    removes &= sorted_classes[start:stop, None] == sorted_classes[None, start:]
+                with span("paired_iou"):
+                    paired_iou = torch.minimum(_iou(left[start:stop], left[start:]),
+                                               _iou(right[start:stop], right[start:]))
+                    removes = ~(paired_iou <= iou_threshold)
+                    if sorted_classes is not None:
+                        removes &= sorted_classes[start:stop, None] == sorted_classes[None, start:]
                 # Transfer one boolean mask per block. Greedy suppression uses
                 # score order on the CPU without a per-candidate CUDA sync.
-                removes_cpu = removes.cpu().numpy()
-                for index in range(start, stop):
-                    if not suppressed[index]:
-                        kept.append(index)
-                        suppressed[index + 1:] |= removes_cpu[index - start, index + 1 - start:]
+                with span("decision_mask_d2h"):
+                    removes_cpu = removes.cpu().numpy()
+                with span("greedy_cpu"):
+                    for index in range(start, stop):
+                        if not suppressed[index]:
+                            kept.append(index)
+                            suppressed[index + 1:] |= removes_cpu[index - start, index + 1 - start:]
             indices = order[torch.as_tensor(kept, dtype=torch.long, device=order.device)]
     return PairDetections(boxes6[indices], scores[indices], indices,
                           classes[indices] if classes is not None else None)

@@ -5,6 +5,13 @@ import argparse
 from pathlib import Path
 import subprocess
 
+# The Windows ONNX DLL and PyTorch DLLs can conflict when Torch is loaded first.
+try:
+    import onnx
+except ImportError as exc:
+    onnx = None
+    ONNX_IMPORT_ERROR = exc
+
 import torch
 
 from benchmark_edge_acceleration import revision
@@ -51,10 +58,8 @@ def main():
     args = parser.parse_args()
     if args.width <= 0 or not 0 <= args.crop_top_px < args.height or args.output.suffix != ".onnx":
         parser.error("positive image dimensions, valid crop and .onnx output required")
-    try:
-        import onnx
-    except ImportError:
-        parser.error("the onnx package is required for export")
+    if onnx is None:
+        parser.error(f"the onnx package could not be loaded: {ONNX_IMPORT_ERROR}")
     torch.set_num_threads(2)
     hw = (args.height - args.crop_top_px, args.width)
     padded_hw = LightStereoFeatureEncoder._padded_size(*hw)

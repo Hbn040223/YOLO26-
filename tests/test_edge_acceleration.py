@@ -1,5 +1,6 @@
 """Regression checks for zero-default stereo acceleration."""
 from pathlib import Path
+from contextlib import contextmanager
 import sys
 from types import SimpleNamespace
 import unittest
@@ -13,6 +14,22 @@ from lightbackbone_stereo_yolo.model import StereoYoloLocalModel
 
 
 class EdgeAccelerationTest(unittest.TestCase):
+    def test_native_nms_profiles_overlaps_transfer_and_greedy_without_changing_pair_ids(self):
+        from lightbackbone_stereo_yolo.detection import paired_nms
+
+        boxes = torch.tensor([[0., 0., 20., 10., 0., 20.], [0., 0., 20., 10., 0., 20.]])
+        scores = torch.tensor([.8, .9])
+        observed = []
+
+        @contextmanager
+        def measure(name):
+            observed.append(name)
+            yield
+
+        output = paired_nms(boxes, scores, profile=measure)
+        self.assertEqual(observed, ["paired_iou", "decision_mask_d2h", "greedy_cpu"])
+        self.assertEqual(output.indices.tolist(), paired_nms(boxes, scores).indices.tolist())
+
     def test_containment_requires_the_same_strictly_larger_higher_scoring_pair(self):
         from lightbackbone_stereo_yolo.detection import suppress_contained_pairs
 

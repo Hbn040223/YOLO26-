@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+from functools import partial
 import json
 from pathlib import Path
+from time import perf_counter
+from unittest.mock import patch
 
 import torch
 
-from benchmark_edge_acceleration import revision, summarize
+from benchmark_edge_acceleration import revision, summarize, synchronize
 from benchmark_edge_backbone import device_pairs, elapsed
 from evaluate_paired_nms import sha256, write_json
 from infer import ROOT, load_published_model, normalized_rgb
+from lightbackbone_stereo_yolo import detection
 from lightbackbone_stereo_yolo.edge_deployment import (
     FRONTEND_OUTPUTS, StaticStereoFrontend, unpack_frontend_outputs,
 )
@@ -65,6 +70,41 @@ def tensor_errors(reference, candidate):
         error = (actual - expected).abs()
         result[name] = {"mean_absolute": float(error.mean()), "max_absolute": float(error.max())}
     return result
+
+
+def profile_native_dispatch(model, device, dispatch):
+    """Time isolated stages in a separate, synchronized dispatch."""
+    timings = dict.fromkeys(("paired_iou", "decision_mask_d2h", "greedy_cpu", "roi_mask_idisp"), 0.)
+    instance_start = None
+
+    @contextmanager
+    def span(name):
+        synchronize(device)
+        start = perf_counter()
+        try:
+            yield
+        finally:
+            synchronize(device)
+            timings[name] += (perf_counter() - start) * 1000
+
+    def start_instance(*_):
+        nonlocal instance_start
+        synchronize(device)
+        instance_start = perf_counter()
+
+    def end_instance(*_):
+        synchronize(device)
+        timings["roi_mask_idisp"] = (perf_counter() - instance_start) * 1000
+
+    before = model.instance_head.register_forward_pre_hook(start_instance)
+    after = model.instance_head.register_forward_hook(end_instance)
+    try:
+        with patch.object(detection, "paired_nms", partial(detection.paired_nms, profile=span)):
+            dispatch()
+    finally:
+        before.remove()
+        after.remove()
+    return {name + "_ms": duration for name, duration in timings.items()}
 
 
 @torch.inference_mode()
@@ -149,12 +189,20 @@ def main():
                         "native_decode_nms_roi_ms": native_ms, "frozen_pairs": len(replay.indices)}
         if iteration >= 0:
             rows.append(row)
+    profiles = {arm: [] for arm in names}
+    for iteration in range(args.repeats):
+        start = iteration % len(names)
+        for arm in names[start:] + names[:start]:
+            tensors = frontends[arm](*cropped)
+            profiles[arm].append(profile_native_dispatch(model, device, lambda: dispatch(tensors)))
     write_json(args.output, {
         "commit": revision(ROOT), "export_manifest_sha256": sha256(args.manifest),
         "tensorrt_version": trt.__version__, "device_name": torch.cuda.get_device_name(device),
         "power_mode": args.power_mode, "encoder_padded_hw": manifest["encoder_padded_hw"], "crop_top_px": crop,
         "matched_load_pair_ids": replay.indices.tolist(), "numerical": numerical,
         "summary": {arm: summarize([row[arm] for row in rows]) for arm in names}, "timings": rows,
+        "native_stage_summary": {arm: summarize(values) for arm, values in profiles.items()},
+        "native_stage_timings": profiles,
     })
 
 
