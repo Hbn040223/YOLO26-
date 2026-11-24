@@ -29,6 +29,62 @@ class PairDetections:
 
 
 @dataclass(frozen=True)
+class ContainmentEvent:
+    suppressor_id: int
+    suppressed_id: int
+    left_coverage: float
+    right_coverage: float
+
+
+def suppress_contained_pairs(
+    pairs: PairDetections, threshold: float = .90,
+) -> tuple[PairDetections, tuple[ContainmentEvent, ...]]:
+    """Greedily remove lower-scoring stereo pairs covered by one larger pair."""
+    if not 0 < threshold <= 1:
+        raise ValueError("containment threshold must be in (0, 1]")
+    if pairs.scores.numel() < 2:
+        return pairs, ()
+    if pairs.classes is None:
+        raise ValueError("containment suppression requires candidate classes")
+
+    order = pairs.scores.argsort(descending=True, stable=True)
+    # The greedy decision is sequential. Transfer the compact candidate table
+    # in one pass and compute coverage in FP32 even with FP16 inference.
+    rows = torch.cat((pairs.boxes6[order].float(), pairs.scores[order, None].float(),
+                      pairs.classes[order, None]), dim=1)
+    rows = rows.detach().cpu().numpy()
+    boxes = np.stack((rows[:, :4], rows[:, [4, 1, 5, 3]]), axis=1)
+    sizes = boxes[:, :, 2:] - boxes[:, :, :2]
+    areas = np.maximum(sizes, 0).prod(axis=-1)
+    valid = np.isfinite(boxes).all(axis=(1, 2)) & (sizes > 0).all(axis=(1, 2))
+    suppressed = np.zeros(len(rows), dtype=bool)
+    keep = []
+    events = []
+    for index, row in enumerate(rows):
+        if suppressed[index]:
+            continue
+        keep.append(index)
+        if not valid[index]:
+            continue
+        candidates = np.flatnonzero(valid & ~suppressed & (rows[:, 6] < row[6])
+                                    & (rows[:, 7] == row[7]) & (areas < areas[index]).all(axis=1))
+        small = boxes[candidates]
+        large = boxes[index]
+        overlap = np.minimum(small[:, :, 2:], large[:, 2:]) - np.maximum(small[:, :, :2], large[:, :2])
+        coverage = np.maximum(overlap, 0).prod(axis=-1) / areas[candidates]
+        contained = (coverage >= threshold).all(axis=1)
+        suppressed[candidates[contained]] = True
+        for removed, (left, right) in zip(candidates[contained], coverage[contained]):
+            events.append((index, removed, float(left), float(right)))
+    selected = order[torch.as_tensor(keep, dtype=torch.long, device=order.device)]
+    candidate_ids = pairs.indices[order].tolist() if events else []
+    records = tuple(ContainmentEvent(candidate_ids[large], candidate_ids[small], left, right)
+                    for large, small, left, right in events)
+    return PairDetections(pairs.boxes6[selected], pairs.scores[selected], pairs.indices[selected],
+                          pairs.classes[selected]), records
+
+
+@dataclass(frozen=True)
 class DenseStereoPredictions:
     """One joint objectness/class/6D prediction at every stereo feature cell."""
 

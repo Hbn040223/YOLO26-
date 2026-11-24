@@ -39,7 +39,8 @@ def resolve_mask_threshold(bundle, override=None):
 
 
 def load_published_model(weights, openstereo_source, device, *, score=.40, topk=500,
-                         apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None, roi_max_distance=None, bf_px_m=None, cx_delta_px=None):
+                         apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None, roi_max_distance=None,
+                         bf_px_m=None, cx_delta_px=None, crop_top_px=0, containment_threshold=None):
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
@@ -65,6 +66,7 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
         foreground_class_indices=tuple(bundle["class_mapping"][key]
                                        for key in bundle.get("foreground_mask_raw_classes", ())),
         mask_threshold=resolve_mask_threshold(bundle, mask_threshold), roi_selection=selection,
+        crop_top_px=crop_top_px, containment_threshold=containment_threshold,
     )
     model.load_state_dict(bundle["model"], strict=True)
     return model.to(device).eval(), bundle
@@ -80,12 +82,17 @@ def main() -> None:
     parser.add_argument("--score", type=float, default=.40)
     parser.add_argument("--paired-nms", action="store_true", help="opt in to class-aware stereo pair suppression")
     parser.add_argument("--paired-nms-iou", type=float, default=.5)
+    parser.add_argument("--crop-top-px", type=int, default=0, help="crop this many rows from both rectified images")
+    parser.add_argument("--containment-suppression", action="store_true", help="suppress contained pairs after paired NMS")
+    parser.add_argument("--containment-threshold", type=float, default=.90)
     parser.add_argument("--mask-threshold", type=float, help="override the probability cutoff in the unfurled Mask logit space")
     parser.add_argument("--roi-max-distance", type=float, help="opt in to experimental near-Car foreground selection")
     parser.add_argument("--bf-px-m", type=float, help="fB from this stereo frame calibration")
     parser.add_argument("--cx-delta-px", type=float, help="left cx minus right cx in pixels")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.containment_suppression and not args.paired_nms:
+        parser.error("--containment-suppression requires --paired-nms")
     torch.set_num_threads(2)
     torch.set_num_interop_threads(1)
     torch.backends.cudnn.deterministic = True
@@ -95,6 +102,8 @@ def main() -> None:
         apply_paired_nms=True if args.paired_nms else None, paired_nms_iou=args.paired_nms_iou,
         mask_threshold=args.mask_threshold, roi_max_distance=args.roi_max_distance,
         bf_px_m=args.bf_px_m, cx_delta_px=args.cx_delta_px,
+        crop_top_px=args.crop_top_px,
+        containment_threshold=args.containment_threshold if args.containment_suppression else None,
     )
     if not model.foreground_class_indices:
         warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",
@@ -104,36 +113,39 @@ def main() -> None:
         normalized_rgb(path, normalization["mean"], normalization["std"])[None].to(args.device)
         for path in (args.left, args.right)
     )
-    crops = []
-    hook = model.instance_head.idisp.register_forward_hook(lambda _module, args, _value: crops.append(args[3]))
-    try:
-        with torch.inference_mode():
-            result = model(left, right)
-            arrays = {name: getattr(result, name).cpu().numpy() for name in (
-                "boxes_left", "boxes_right", "scores", "classes", "disparity", "validity", "mask_validity",
-                "pair_ids", "foreground_validity",
-            )}
-            if result.left_only is not None:
-                arrays.update({
-                    "left_only_boxes": result.left_only.boxes.cpu().numpy(),
-                    "left_only_scores": result.left_only.scores.cpu().numpy(),
-                    "left_only_ids": result.left_only.ids.cpu().numpy(),
-                    "left_only_classes": result.left_only.classes.cpu().numpy(),
-                    "left_only_distance_m": result.left_only.distance_m.cpu().numpy(),
-                })
-            arrays["roi_selection_enabled"] = np.asarray(model.roi_selection is not None)
-            arrays["mask_probability"] = result.mask_logits.sigmoid().cpu().numpy()
-            arrays["foreground_disparity"] = result.disparity.masked_fill(
-                ~result.foreground_validity, torch.nan).cpu().numpy()
-            arrays["foreground_supported"] = np.asarray(bool(model.foreground_class_indices))
-            arrays["mask_threshold_on_saved_logits"] = np.asarray(model.mask_threshold)
-            arrays["foreground_supported_raw_classes"] = np.asarray(
-                bundle.get("foreground_mask_raw_classes", ()), dtype=np.int64)
-    finally:
-        hook.remove()
+    with torch.inference_mode():
+        result = model(left, right)
+        arrays = {name: getattr(result, name).cpu().numpy() for name in (
+            "boxes_left", "boxes_right", "scores", "classes", "disparity", "validity", "mask_validity",
+            "pair_ids", "foreground_validity",
+        )}
+        if result.left_only is not None:
+            arrays.update({
+                "left_only_boxes": result.left_only.boxes.cpu().numpy(),
+                "left_only_scores": result.left_only.scores.cpu().numpy(),
+                "left_only_ids": result.left_only.ids.cpu().numpy(),
+                "left_only_classes": result.left_only.classes.cpu().numpy(),
+                "left_only_distance_m": result.left_only.distance_m.cpu().numpy(),
+            })
+        arrays["roi_selection_enabled"] = np.asarray(model.roi_selection is not None)
+        arrays["mask_probability"] = result.mask_logits.sigmoid().cpu().numpy()
+        arrays["foreground_disparity"] = result.disparity.masked_fill(
+            ~result.foreground_validity, torch.nan).cpu().numpy()
+        arrays["foreground_supported"] = np.asarray(bool(model.foreground_class_indices))
+        arrays["mask_threshold_on_saved_logits"] = np.asarray(model.mask_threshold)
+        arrays["foreground_supported_raw_classes"] = np.asarray(
+            bundle.get("foreground_mask_raw_classes", ()), dtype=np.int64)
     for name in ("c_l", "c_r", "c", "y0", "h_crop", "w_roi", "h_roi"):
-        arrays[name] = getattr(crops[0], name).cpu().numpy() if crops else np.empty(0)
-    arrays["image_hw"] = np.asarray(left.shape[-2:])
+        arrays[name] = getattr(result.crop, name).cpu().numpy() if result.crop is not None else np.empty(0)
+    arrays["image_hw"] = np.asarray(result.image_hw)
+    arrays["crop_top_px"] = np.asarray(result.crop_top_px)
+    arrays["encoder_padded_hw"] = np.asarray(result.encoder_padded_hw, dtype=np.int64)
+    arrays["containment_pair_ids"] = np.asarray(
+        [(event.suppressor_id, event.suppressed_id) for event in result.containment_events], dtype=np.int64,
+    ).reshape(-1, 2)
+    arrays["containment_coverages"] = np.asarray(
+        [(event.left_coverage, event.right_coverage) for event in result.containment_events], dtype=np.float32,
+    ).reshape(-1, 2)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("wb") as handle:
         np.savez_compressed(handle, **arrays)

@@ -1,6 +1,6 @@
 """Instance-level assembly for the baseline local mask and iDisp branches."""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import torch
 from torch import Tensor, nn
 from .local_disparity import RegularizedIDispHead, RoiDisparity
@@ -9,7 +9,18 @@ from .roi import ROI_SAMPLING_MODES, CropMetadata, LeftRoIAlign, StereoRoIAlign,
 from .local_aggregation import AttentionPyramid
 from .roi_selection import LeftOnlyDetections, RoiPairSelection, select_roi_pairs, subset_pairs, subset_crop, project_foreground, keep_foreground_pairs, _iou
 from .geometry import generate_point_locations, point_levels
-from .detection import StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions, generate_grid_anchors
+from .detection import (
+    ContainmentEvent, StereoYoloHead, decode_anchorfree_predictions, decode_dense_predictions,
+    generate_grid_anchors, suppress_contained_pairs,
+)
+
+
+def restore_box_rows(boxes: Tensor, crop_top_px: int) -> Tensor:
+    return boxes + boxes.new_tensor((0, crop_top_px, 0, crop_top_px)) if crop_top_px else boxes
+
+
+def restore_crop_rows(crop: CropMetadata | None, crop_top_px: int) -> CropMetadata | None:
+    return replace(crop, y0=crop.y0 + crop_top_px) if crop is not None and crop_top_px else crop
 
 
 @dataclass(frozen=True)
@@ -123,6 +134,11 @@ class StereoYoloLocalOutput:
     peak: Tensor
     entropy: Tensor
     left_only: LeftOnlyDetections | None = None
+    crop: CropMetadata | None = None
+    crop_top_px: int = 0
+    image_hw: tuple[int, int] | None = None
+    encoder_padded_hw: tuple[int, int] | None = None
+    containment_events: tuple[ContainmentEvent, ...] = ()
 
 
 class StereoYoloLocalModel(nn.Module):
@@ -134,6 +150,7 @@ class StereoYoloLocalModel(nn.Module):
         right_offset_mode: str = "legacy_clamp", apply_paired_nms: bool | None = None,
         paired_nms_iou: float = .5, foreground_class_indices: tuple[int, ...] = (),
         mask_threshold: float = .50, roi_selection: RoiPairSelection | None = None,
+        crop_top_px: int = 0, containment_threshold: float | None = None,
     ) -> None:
         super().__init__()
         self.encoder, self.detector, self.instance_head, self.score_threshold, self.pre_nms_topk, self.detector_variant = encoder, detector, instance_head, score_threshold, pre_nms_topk, detector_variant
@@ -144,6 +161,17 @@ class StereoYoloLocalModel(nn.Module):
             raise ValueError("paired NMS IoU must be between 0 and 1")
         self.apply_paired_nms = apply_paired_nms
         self.paired_nms_iou = paired_nms_iou
+        if type(crop_top_px) is not int or crop_top_px < 0:
+            raise ValueError("crop_top_px must be a non-negative integer")
+        if containment_threshold is not None:
+            if not 0 < containment_threshold <= 1:
+                raise ValueError("containment threshold must be in (0, 1]")
+            if detector_variant == "stereo_yolo26_pan" and apply_paired_nms is not True:
+                raise ValueError("containment suppression requires explicit paired NMS")
+            if roi_selection is not None:
+                raise ValueError("containment suppression and near selection require separate runs")
+        self.crop_top_px = crop_top_px
+        self.containment_threshold = containment_threshold
         if foreground_class_indices and instance_head.roi_sampling != "fixed_56":
             raise ValueError("foreground disparity export requires the fixed_56 grid")
         self.foreground_class_indices = foreground_class_indices
@@ -162,7 +190,16 @@ class StereoYoloLocalModel(nn.Module):
     def forward(self, left: Tensor, right: Tensor) -> StereoYoloLocalOutput:
         if left.shape[0] != 1:
             raise ValueError("baseline inference currently accepts one stereo pair per call")
+        image_hw = tuple(left.shape[-2:])
+        crop_top_px = self.crop_top_px
+        if crop_top_px >= image_hw[0]:
+            raise ValueError("crop_top_px must be less than image height")
+        if crop_top_px:
+            if left.shape != right.shape:
+                raise ValueError("left and right must be equal-shape NCHW image tensors")
+            left, right = left[..., crop_top_px:, :], right[..., crop_top_px:, :]
         pyramid = self.encoder(left, right)
+        encoder_padded_hw = getattr(getattr(pyramid, "metadata", None), "padded_size", None)
         dense = self.detector(pyramid)
         if self.detector_variant == "stereo_yolo26_pan":
             locations = generate_point_locations(point_levels(pyramid), left.device)
@@ -187,11 +224,16 @@ class StereoYoloLocalModel(nn.Module):
             )
         else:
             raise ValueError("unsupported detector_variant")
+        containment_events = ()
+        if self.containment_threshold is not None:
+            pair, containment_events = suppress_contained_pairs(pair, self.containment_threshold)
         left_only = None
         if self.roi_selection is not None:
             pair, left_only = select_roi_pairs(pair,
                 {"objectness": dense.objectness[0], "class_logits": dense.class_logits[0], "box6": dense.box6[0]},
                 locations, left.shape[-2:], self.roi_selection, self.right_offset_mode)
+            if crop_top_px:
+                left_only = replace(left_only, boxes=restore_box_rows(left_only.boxes, crop_top_px))
         if pair.boxes6.numel() == 0:
             empty = left.new_empty((0,))
             empty_ids = left.new_empty((0,), dtype=torch.long)
@@ -203,6 +245,7 @@ class StereoYoloLocalModel(nn.Module):
                 scores=empty, classes=empty_ids, mask_logits=left.new_empty((0, 1, 28, 28)),
                 mask_validity=left.new_empty((0, 1, 28, 28), dtype=torch.bool), disparity=empty_disparity,
                 validity=empty_valid, peak=empty_disparity, entropy=empty_disparity, left_only=left_only,
+                crop_top_px=crop_top_px, image_hw=image_hw, encoder_padded_hw=encoder_padded_hw,
             )
         # RoI branches expect one feature item per candidate; repeat only feature maps, not the encoder.
         count = pair.boxes6.shape[0]
@@ -223,8 +266,13 @@ class StereoYoloLocalModel(nn.Module):
                 mask_threshold=self.mask_threshold,
             )
         return StereoYoloLocalOutput(
-            pair_ids=pair.indices, foreground_validity=foreground, boxes_left=boxes_left, boxes_right=boxes_right,
+            pair_ids=pair.indices, foreground_validity=foreground,
+            boxes_left=restore_box_rows(boxes_left, crop_top_px),
+            boxes_right=restore_box_rows(boxes_right, crop_top_px),
             scores=pair.scores, classes=pair.classes, mask_logits=instance.mask_logits,
             mask_validity=instance.mask_validity, disparity=instance.disparity, validity=instance.validity,
             peak=instance.peak, entropy=instance.entropy, left_only=left_only,
+            crop=restore_crop_rows(getattr(instance, "crop", None), crop_top_px),
+            crop_top_px=crop_top_px, image_hw=image_hw,
+            encoder_padded_hw=encoder_padded_hw, containment_events=containment_events,
         )
