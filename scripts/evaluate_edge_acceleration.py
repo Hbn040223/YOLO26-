@@ -170,9 +170,9 @@ def reduce_pixel_metrics(rows):
 
 @torch.inference_mode()
 def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration, normalization, input_path):
-    geometry = {(setting[1], name): {"gt": 0, "fully_cropped": [], "truncated": [],
-                                    "near_crop_line": [], "review_gt_ids": []}
-                for setting in settings.values() if setting[1] for name in CLASSES.values()}
+    geometry_rows = {(setting[1], name): {"gt": 0, "fully_cropped": [], "truncated": [],
+                                         "near_crop_line": [], "review_gt_ids": []}
+                     for setting in settings.values() if setting[1] for name in CLASSES.values()}
     classes = {index: CLASSES[raw] for raw, index in mapping.items() if raw in CLASSES}
     fg_class = mapping.get(26) if mapping.get(26) in model.foreground_class_indices else None
     frames = []
@@ -185,8 +185,7 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
             groups = _target_groups(sample, mapping, calibration)
             near = {i for i, g in enumerate(groups) if gt_classes[i] == "Car"
                     and g["depth_m"] is not None and 0 < g["depth_m"] < 10}
-        for crop, name in geometry:
-            row = geometry[crop, name]
+        for (crop, name), row in geometry_rows.items():
             rows = [i for i, label in enumerate(gt_classes) if label == name]
             row["gt"] += len(rows)
             for i in rows:
@@ -302,7 +301,7 @@ def evaluate(model, dataset, settings, mapping, device, iou, nearby, calibration
     return {
         "summary": summary, "frames": frames,
         "crop_gt_geometry": [{"crop_top_px": crop, "class": name, **row}
-                             for (crop, name), row in geometry.items()],
+                             for (crop, name), row in geometry_rows.items()],
     }
 
 

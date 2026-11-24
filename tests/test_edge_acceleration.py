@@ -2,6 +2,7 @@
 from pathlib import Path
 from contextlib import contextmanager
 import sys
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
@@ -9,6 +10,7 @@ import torch
 from torch import nn
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from lightbackbone_stereo_yolo.detection import PairDetections
 from lightbackbone_stereo_yolo.model import StereoYoloLocalModel
 
@@ -281,7 +283,6 @@ class EdgeAccelerationTest(unittest.TestCase):
                 manifest_geometry({**manifest, "bindings": {**manifest["bindings"], "right": wrong}})
 
     def test_tensorrt_runner_rejects_shape_before_using_buffers(self):
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
         from benchmark_edge_tensorrt import TensorRTFrontend
 
         runner = object.__new__(TensorRTFrontend)
@@ -290,3 +291,42 @@ class EdgeAccelerationTest(unittest.TestCase):
         for actual in ((1, 3, 375, 1242), (1, 3, 119, 1242), (1, 1, 247, 1242)):
             with self.assertRaisesRegex(ValueError, "expected TensorRT NCHW.*actual"):
                 runner(prepared, torch.empty(actual))
+
+    def test_crop_evaluator_keeps_geometry_rows_across_multiple_frames(self):
+        from PIL import Image
+        from torch.nn import functional as F
+        from evaluate_edge_acceleration import evaluate
+        from lightbackbone_stereo_yolo.detection import DenseStereoPredictions
+        from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder
+        from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead
+
+        class Backbone(nn.Module):
+            output_channels = (3, 3, 3, 3)
+
+            def forward(self, x):
+                return [F.avg_pool2d(x, stride) for stride in (4, 8, 16, 32)]
+
+        class Detector(nn.Module):
+            def forward(self, pyramid):
+                levels = (pyramid.p3_left, pyramid.p4_left, pyramid.c5_left)
+                count = sum(level.shape[-2] * level.shape[-1] for level in levels)
+                return DenseStereoPredictions(torch.full((1, count), -20.), torch.zeros(1, count, 1),
+                                              torch.zeros(1, count, 6))
+
+        class Dataset(list):
+            pass
+
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "view.png"
+            Image.new("RGB", (16, 16)).save(path)
+            data = Dataset({"frame_id": frame, "boxes6": torch.empty(0, 6), "classes": torch.zeros(0, dtype=torch.long),
+                            "masks": torch.zeros(0, 1, 16, 16, dtype=torch.bool), "disparity": torch.zeros(1, 16, 16),
+                            "disparity_valid": torch.zeros(1, 16, 16, dtype=torch.bool)} for frame in ("f1", "f2"))
+            data.records = [SimpleNamespace(left_image=path, right_image=path)] * 2
+            model = StereoYoloLocalModel(LightStereoFeatureEncoder(Backbone(), 4), Detector(),
+                                         StereoLocalInstanceHead(4, 1), detector_variant="stereo_yolo26_pan")
+            result = evaluate(model, data, {"A0": (True, 0, None), "A1": (True, 8, None)}, {26: 0},
+                              torch.device("cpu"), .5, 8, None, {"mean": (0, 0, 0), "std": (1, 1, 1)}, "prepared")
+        self.assertEqual(len(result["frames"]), 2)
+        self.assertEqual(len(result["crop_gt_geometry"]), 4)
+        self.assertEqual(result["frames"][1]["arms"]["A1"]["input_geometry"]["cropped_hw"], (8, 16))
