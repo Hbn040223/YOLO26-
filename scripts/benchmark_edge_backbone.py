@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 from pathlib import Path
 from time import perf_counter
 
 import torch
 
-from benchmark_edge_acceleration import revision, summarize, synchronize
+from benchmark_edge_acceleration import encoder_intervals, register_encoder_boundaries, revision, summarize, synchronize
 from evaluate_paired_nms import sha256, validation_dataset, write_json
 from infer import ROOT, load_published_model
 from lightbackbone_stereo_yolo.detection import PairDetections
@@ -38,6 +39,20 @@ def elapsed(device, call):
     return (perf_counter() - start) * 1000, result
 
 
+def profile_encoder(encoder, left, right, device):
+    marks = {}
+
+    def stamp(name):
+        synchronize(device)
+        marks[name] = perf_counter()
+
+    with ExitStack() as stack:
+        register_encoder_boundaries(stack, encoder, stamp)
+        features = encoder(left, right)
+    return {**encoder_intervals(lambda first, last: (marks[last] - marks[first]) * 1000),
+            "encoder_padded_hw": features.metadata.padded_size}
+
+
 @torch.inference_mode()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -51,6 +66,7 @@ def main():
     parser.add_argument("--warmup", type=int, default=5)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--max-frames", type=int, help="limit the split for a smoke test")
+    parser.add_argument("--profile", action="store_true", help="time backbone, FPN and adapters in a separate pass")
     parser.add_argument("--seed", type=int, default=17)
     parser.add_argument("--pretrained-v3", action="store_true", help="load TIMM MobileNetV3-Small pretrained blocks")
     parser.add_argument("--output", type=Path, required=True)
@@ -74,6 +90,7 @@ def main():
         parser.error("validation split contains no frames")
     normal = bundle["normalization"]
     rows = []
+    profiles = []
     for frame, record in enumerate(records):
         left, right, geometry = load_rectified_pair(record.left_image, record.right_image, normal, args.crop_top_px)
         left, right = left.to(device), right.to(device)
@@ -101,6 +118,10 @@ def main():
                     row[arm] = {"forward_ms": forward_ms, "encoder_ms": encoder_ms, "pairs": len(output.pair_ids)}
                 if repeat >= 0:
                     rows.append(row)
+        if args.profile:
+            profiles.append({"frame_id": record.frame_id, **{
+                arm: profile_encoder(encoder, left, right, device) for arm, encoder in encoders.items()
+            }})
     write_json(args.output, {
         "commit": revision(ROOT), "openstereo_commit": revision(args.openstereo_source),
         "weights_sha256": sha256(args.weights), "split_sha256": sha256(args.split_json),
@@ -113,6 +134,10 @@ def main():
         "summary": {load: {arm: summarize([row[arm] for row in rows if row["load"] == load]) for arm in encoders}
                     for load in dict.fromkeys(row["load"] for row in rows)},
         "timings": rows,
+        "encoder_profiles": profiles,
+        "encoder_profile_summary": {
+            arm: summarize([row[arm] for row in profiles]) for arm in encoders
+        } if profiles else {},
     })
 
 

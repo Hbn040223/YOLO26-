@@ -33,6 +33,29 @@ def synchronize(device):
         torch.cuda.synchronize(device)
 
 
+def register_encoder_boundaries(stack, encoder, stamp):
+    backbone = encoder.backbone
+    last_block = backbone.block4 if hasattr(backbone, "block4") else backbone.blocks[-1]
+    for module, name, before in (
+        (encoder, "encoder_start", True), (encoder, "encoder_end", False),
+        (backbone, "backbone_start", True), (last_block, "mobilenet_end", False),
+        (backbone, "fpn_end", False), (encoder.adapters[0], "adapter_start", True),
+        (encoder.adapters[-1], "adapter_end", False),
+    ):
+        hook = module.register_forward_pre_hook if before else module.register_forward_hook
+        stack.callback(hook(lambda *_, name=name: stamp(name)).remove)
+
+
+def encoder_intervals(elapsed):
+    return {
+        "encoder_ms": elapsed("encoder_start", "encoder_end"),
+        "padding_and_pack_ms": elapsed("encoder_start", "backbone_start"),
+        "mobilenet_ms": elapsed("backbone_start", "mobilenet_end"),
+        "fpn_ms": elapsed("mobilenet_end", "fpn_end"),
+        "adapters_and_intermediate_slicing_ms": elapsed("adapter_start", "adapter_end"),
+    }
+
+
 def profile_forward(model, left, right, device, geometry=None):
     """Measure synchronized stage boundaries independently of the latency runs."""
     marks = {}
@@ -52,15 +75,10 @@ def profile_forward(model, left, right, device, geometry=None):
         stamp("containment_end")
         return result
 
-    encoder = model.encoder
-    backbone = encoder.backbone
     suppress = inference_model.suppress_contained_pairs
     with ExitStack() as stack:
+        register_encoder_boundaries(stack, model.encoder, stamp)
         for module, name, before in (
-            (encoder, "encoder_start", True), (encoder, "encoder_end", False),
-            (backbone, "backbone_start", True), (backbone.block4, "mobilenet_end", False),
-            (backbone, "fpn_end", False), (encoder.adapters[0], "adapter_start", True),
-            (encoder.adapters[-1], "adapter_end", False),
             (model.detector, "detector_start", True), (model.detector, "detector_end", False),
             (model.instance_head, "instance_start", True), (model.instance_head, "instance_end", False),
         ):
@@ -76,11 +94,7 @@ def profile_forward(model, left, right, device, geometry=None):
         return (marks[end] - marks[start]) * 1000 if start in marks and end in marks else 0.
 
     return {
-        "encoder_ms": elapsed("encoder_start", "encoder_end"),
-        "padding_and_pack_ms": elapsed("encoder_start", "backbone_start"),
-        "mobilenet_ms": elapsed("backbone_start", "mobilenet_end"),
-        "fpn_ms": elapsed("mobilenet_end", "fpn_end"),
-        "adapters_and_intermediate_slicing_ms": elapsed("adapter_start", "adapter_end"),
+        **encoder_intervals(elapsed),
         "detector_ms": elapsed("detector_start", "detector_end"),
         "postprocess_and_dispatch_ms": elapsed(
             "detector_end", "instance_start" if "instance_start" in marks else "output_end"),
