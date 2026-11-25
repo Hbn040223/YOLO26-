@@ -1,0 +1,388 @@
+{
+  "pair": "kitti2015_000000_10",
+  "image_hw": [
+    375,
+    1242
+  ],
+  "weights": "stereo-yolo26-fixed56-seed17-e20.pt",
+  "device": "Orin",
+  "torch": "2.8.0",
+  "dtype": "torch.float32",
+  "score_threshold": 0.4,
+  "topk": 500,
+  "paired_nms": false,
+  "warmup": 5,
+  "repeats": 20,
+  "pair_count": 50,
+  "disparity_shape": [
+    50,
+    56,
+    56
+  ],
+  "class_mapping": {
+    "24": 0,
+    "26": 1,
+    "27": 2,
+    "28": 3
+  },
+  "class_counts": {
+    "1": 50
+  },
+  "score_range": [
+    0.40043285489082336,
+    0.8182331323623657
+  ],
+  "single_cli_run_excluding_python_import_and_cuda_init_ms": 6755.006634999972,
+  "forward_timing_ms": {
+    "model_forward": {
+      "p50": 838.9070725000352,
+      "p95": 1122.0300920999932
+    },
+    "encoder": {
+      "p50": 164.35407257080078,
+      "p95": 217.45712203979494
+    },
+    "detector_head": {
+      "p50": 16.517327785491943,
+      "p95": 24.34483280181885
+    },
+    "decode_and_roi_dispatch": {
+      "p50": 6.87446403503418,
+      "p95": 11.196447944641115
+    },
+    "roi_sample": {
+      "p50": 23.511296272277832,
+      "p95": 27.002628517150878
+    },
+    "local_disparity": {
+      "p50": 610.4896240234375,
+      "p95": 880.478726196289
+    },
+    "mask": {
+      "p50": 20.52291202545166,
+      "p95": 23.598396110534672
+    },
+    "instance_total": {
+      "p50": 651.0444946289062,
+      "p95": 919.4113159179688
+    },
+    "output_assembly": {
+      "p50": 0.031231999397277832,
+      "p95": 0.03136640042066574
+    }
+  },
+  "input_timing_ms": {
+    "read_and_normalize": {
+      "p50": 48.729894500013415,
+      "p95": 54.5397990500419
+    },
+    "host_to_device": {
+      "p50": 2.6229224999383405,
+      "p95": 2.7346301999045863
+    }
+  },
+  "forward_samples_ms": [
+    {
+      "model_forward": 837.1088820000523,
+      "encoder": 164.5451202392578,
+      "detector_head": 12.793696403503418,
+      "decode_and_roi_dispatch": 10.424351692199707,
+      "roi_sample": 20.80691146850586,
+      "local_disparity": 612.9379272460938,
+      "mask": 15.467007637023926,
+      "instance_total": 649.3010864257812,
+      "output_assembly": 0.03126399964094162
+    },
+    {
+      "model_forward": 840.705263000018,
+      "encoder": 164.5011444091797,
+      "detector_head": 15.550111770629883,
+      "decode_and_roi_dispatch": 11.144351959228516,
+      "roi_sample": 24.401599884033203,
+      "local_disparity": 613.2332763671875,
+      "mask": 11.807968139648438,
+      "instance_total": 649.53515625,
+      "output_assembly": 0.031072000041604042
+    },
+    {
+      "model_forward": 1083.5374729999785,
+      "encoder": 164.20700073242188,
+      "detector_head": 23.849088668823242,
+      "decode_and_roi_dispatch": 4.604703903198242,
+      "roi_sample": 17.18979263305664,
+      "local_disparity": 842.05029296875,
+      "mask": 31.664064407348633,
+      "instance_total": 890.994873046875,
+      "output_assembly": 0.031168000772595406
+    },
+    {
+      "model_forward": 900.4290899999887,
+      "encoder": 201.6339874267578,
+      "detector_head": 13.764287948608398,
+      "decode_and_roi_dispatch": 9.903871536254883,
+      "roi_sample": 24.42470359802246,
+      "local_disparity": 627.514404296875,
+      "mask": 21.643583297729492,
+      "instance_total": 673.6751708984375,
+      "output_assembly": 0.03136000037193298
+    },
+    {
+      "model_forward": 833.5386109999945,
+      "encoder": 157.0693817138672,
+      "detector_head": 17.67683219909668,
+      "decode_and_roi_dispatch": 6.201600074768066,
+      "roi_sample": 26.928255081176758,
+      "local_disparity": 604.280029296875,
+      "mask": 21.25436782836914,
+      "instance_total": 652.5538330078125,
+      "output_assembly": 0.031039999797940254
+    },
+    {
+      "model_forward": 832.7201590000186,
+      "encoder": 164.80880737304688,
+      "detector_head": 12.797823905944824,
+      "decode_and_roi_dispatch": 6.43123197555542,
+      "roi_sample": 25.632768630981445,
+      "local_disparity": 602.0833129882812,
+      "mask": 20.821247100830078,
+      "instance_total": 648.6310424804688,
+      "output_assembly": 0.031072000041604042
+    },
+    {
+      "model_forward": 891.8695130000742,
+      "encoder": 159.52146911621094,
+      "detector_head": 17.17475128173828,
+      "decode_and_roi_dispatch": 6.306591987609863,
+      "roi_sample": 25.41606330871582,
+      "local_disparity": 660.2615356445312,
+      "mask": 23.105440139770508,
+      "instance_total": 708.8789672851562,
+      "output_assembly": 0.03110400028526783
+    },
+    {
+      "model_forward": 1041.4910800000143,
+      "encoder": 240.09788513183594,
+      "detector_head": 29.214303970336914,
+      "decode_and_roi_dispatch": 6.2251200675964355,
+      "roi_sample": 21.424415588378906,
+      "local_disparity": 721.9827270507812,
+      "mask": 20.70140838623047,
+      "instance_total": 764.200927734375,
+      "output_assembly": 0.03126399964094162
+    },
+    {
+      "model_forward": 833.435469000051,
+      "encoder": 159.5570526123047,
+      "detector_head": 14.547391891479492,
+      "decode_and_roi_dispatch": 6.067359924316406,
+      "roi_sample": 27.729888916015625,
+      "local_disparity": 605.1787109375,
+      "mask": 20.16009521484375,
+      "instance_total": 653.1596069335938,
+      "output_assembly": 0.03136000037193298
+    },
+    {
+      "model_forward": 831.1552200000278,
+      "encoder": 162.6549072265625,
+      "detector_head": 12.806559562683105,
+      "decode_and_roi_dispatch": 8.782048225402832,
+      "roi_sample": 21.9847354888916,
+      "local_disparity": 603.5989379882812,
+      "mask": 21.133567810058594,
+      "instance_total": 646.8091430664062,
+      "output_assembly": 0.03129599988460541
+    },
+    {
+      "model_forward": 829.9754649999613,
+      "encoder": 163.25010681152344,
+      "detector_head": 13.722208023071289,
+      "decode_and_roi_dispatch": 7.482175827026367,
+      "roi_sample": 23.782655715942383,
+      "local_disparity": 601.1609497070312,
+      "mask": 20.33238410949707,
+      "instance_total": 645.3705444335938,
+      "output_assembly": 0.031136000528931618
+    },
+    {
+      "model_forward": 1081.483468999977,
+      "encoder": 165.93919372558594,
+      "detector_head": 13.773856163024902,
+      "decode_and_roi_dispatch": 5.4970879554748535,
+      "roi_sample": 24.191999435424805,
+      "local_disparity": 858.6016845703125,
+      "mask": 11.81708812713623,
+      "instance_total": 896.22119140625,
+      "output_assembly": 0.031199999153614044
+    },
+    {
+      "model_forward": 855.2232519999734,
+      "encoder": 188.33445739746094,
+      "detector_head": 15.859904289245605,
+      "decode_and_roi_dispatch": 9.765695571899414,
+      "roi_sample": 20.70627212524414,
+      "local_disparity": 599.61181640625,
+      "mask": 20.695167541503906,
+      "instance_total": 641.1041870117188,
+      "output_assembly": 0.03126399964094162
+    },
+    {
+      "model_forward": 828.9155339999752,
+      "encoder": 162.12937927246094,
+      "detector_head": 13.628640174865723,
+      "decode_and_roi_dispatch": 7.3176960945129395,
+      "roi_sample": 23.07756805419922,
+      "local_disparity": 602.1517333984375,
+      "mask": 20.350656509399414,
+      "instance_total": 645.6879272460938,
+      "output_assembly": 0.03129599988460541
+    },
+    {
+      "model_forward": 1119.2510399999946,
+      "encoder": 167.49868774414062,
+      "detector_head": 21.69251251220703,
+      "decode_and_roi_dispatch": 10.787360191345215,
+      "roi_sample": 17.28118324279785,
+      "local_disparity": 880.785400390625,
+      "mask": 21.03775978088379,
+      "instance_total": 919.1961669921875,
+      "output_assembly": 0.03126399964094162
+    },
+    {
+      "model_forward": 1174.8320819999662,
+      "encoder": 216.2655029296875,
+      "detector_head": 22.82918357849121,
+      "decode_and_roi_dispatch": 12.186271667480469,
+      "roi_sample": 24.7010555267334,
+      "local_disparity": 880.4625854492188,
+      "mask": 18.242687225341797,
+      "instance_total": 923.4991455078125,
+      "output_assembly": 0.031072000041604042
+    },
+    {
+      "model_forward": 823.396310000021,
+      "encoder": 152.9656982421875,
+      "detector_head": 24.088544845581055,
+      "decode_and_roi_dispatch": 4.537504196166992,
+      "roi_sample": 20.92790412902832,
+      "local_disparity": 606.8010864257812,
+      "mask": 11.819647789001465,
+      "instance_total": 639.6398315429688,
+      "output_assembly": 0.031488001346588135
+    },
+    {
+      "model_forward": 835.1928299999827,
+      "encoder": 164.76690673828125,
+      "detector_head": 21.1060791015625,
+      "decode_and_roi_dispatch": 5.937471866607666,
+      "roi_sample": 23.23993682861328,
+      "local_disparity": 608.0413208007812,
+      "mask": 11.818528175354004,
+      "instance_total": 643.1918334960938,
+      "output_assembly": 0.031072000041604042
+    },
+    {
+      "model_forward": 829.4418919999771,
+      "encoder": 162.16099548339844,
+      "detector_head": 22.15862464904785,
+      "decode_and_roi_dispatch": 5.630047798156738,
+      "roi_sample": 26.964351654052734,
+      "local_disparity": 596.6837158203125,
+      "mask": 13.551936149597168,
+      "instance_total": 637.2908325195312,
+      "output_assembly": 0.03126399964094162
+    },
+    {
+      "model_forward": 1036.084585000026,
+      "encoder": 160.80450439453125,
+      "detector_head": 18.20230484008789,
+      "decode_and_roi_dispatch": 7.697375774383545,
+      "roi_sample": 18.676063537597656,
+      "local_disparity": 807.2378540039062,
+      "mask": 23.173887252807617,
+      "instance_total": 849.1803588867188,
+      "output_assembly": 0.031168000772595406
+    }
+  ],
+  "input_samples_ms": [
+    {
+      "read_and_normalize": 64.33838499992817,
+      "host_to_device": 2.2560410000096454
+    },
+    {
+      "read_and_normalize": 54.02408400004788,
+      "host_to_device": 2.144509000004291
+    },
+    {
+      "read_and_normalize": 47.96837599997161,
+      "host_to_device": 2.2061299999904804
+    },
+    {
+      "read_and_normalize": 48.75185100002,
+      "host_to_device": 2.58416099995884
+    },
+    {
+      "read_and_normalize": 48.85076199991545,
+      "host_to_device": 2.714362999995501
+    },
+    {
+      "read_and_normalize": 49.98596500001895,
+      "host_to_device": 2.4901759999238493
+    },
+    {
+      "read_and_normalize": 48.58357499995236,
+      "host_to_device": 2.579345000071953
+    },
+    {
+      "read_and_normalize": 48.766552000074626,
+      "host_to_device": 2.6097729999037256
+    },
+    {
+      "read_and_normalize": 49.180243999899176,
+      "host_to_device": 2.5981580000689064
+    },
+    {
+      "read_and_normalize": 48.98497900001075,
+      "host_to_device": 2.5683720000415633
+    },
+    {
+      "read_and_normalize": 49.574738000046636,
+      "host_to_device": 2.473346999977366
+    },
+    {
+      "read_and_normalize": 48.521696999955566,
+      "host_to_device": 2.6360719999729554
+    },
+    {
+      "read_and_normalize": 49.85401900000852,
+      "host_to_device": 2.7580040000430017
+    },
+    {
+      "read_and_normalize": 48.707938000006834,
+      "host_to_device": 2.6469819999874744
+    },
+    {
+      "read_and_normalize": 48.5578830000577,
+      "host_to_device": 2.7333999998973013
+    },
+    {
+      "read_and_normalize": 48.55618700003106,
+      "host_to_device": 2.6723859999719934
+    },
+    {
+      "read_and_normalize": 48.406035999960295,
+      "host_to_device": 2.6539570000068125
+    },
+    {
+      "read_and_normalize": 48.479880000058984,
+      "host_to_device": 2.721753999935572
+    },
+    {
+      "read_and_normalize": 48.536382000065714,
+      "host_to_device": 2.728025000010348
+    },
+    {
+      "read_and_normalize": 48.41595499999585,
+      "host_to_device": 2.714714999910939
+    }
+  ]
+}
