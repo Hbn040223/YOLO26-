@@ -103,11 +103,62 @@ def _register_lightstereo_source(source_root: str | Path) -> None:
     _register_openstereo_packages(source)
 
 
-def build_lightstereo_backbone(source_root: str | Path) -> nn.Module:
+ENCODER_BACKBONES = ("v2", "v2-050")
+
+
+def encoder_backbone_from_config(config, requested=None):
+    variant = requested if requested is not None else config.get("encoder_backbone", "v2")
+    if variant not in ENCODER_BACKBONES:
+        raise ValueError(f"unsupported encoder backbone {variant!r}")
+    if requested is not None and config.get("encoder_backbone", "v2") != requested:
+        raise ValueError("requested encoder backbone differs from checkpoint")
+    return variant
+
+
+class MobileNetV2HalfFpn(nn.Module):
+    def __init__(self, mobilenet, fpn_layer, basic_conv):
+        super().__init__()
+        self.conv_stem, self.bn1, self.act1 = mobilenet.conv_stem, mobilenet.bn1, mobilenet.act1
+        self.blocks = mobilenet.blocks[:6]
+        channels = tuple(self.blocks[index][-1].conv_pwl.out_channels for index in (1, 2, 4, 5))
+        c2, c3, c4, c5 = self.output_channels = channels
+        self.fpn_layer4 = fpn_layer(c5, c4)
+        self.fpn_layer3 = fpn_layer(c4, c3)
+        self.fpn_layer2 = fpn_layer(c3, c2)
+        self.out_conv = basic_conv(c2, c2, kernel_size=3, padding=1, padding_mode="replicate",
+                                   norm_layer=nn.InstanceNorm2d)
+
+    def forward(self, images):
+        c2 = self.blocks[1](self.blocks[0](self.act1(self.bn1(self.conv_stem(images)))))
+        c3 = self.blocks[2](c2)
+        c4 = self.blocks[4](self.blocks[3](c3))
+        c5 = self.blocks[5](c4)
+        p4 = self.fpn_layer4(c5, c4)
+        p3 = self.fpn_layer3(p4, c3)
+        return self.out_conv(self.fpn_layer2(p3, c2)), p3, p4, c5
+
+    def load_trunk_state(self, payload):
+        state = _unwrap_checkpoint(payload)
+        expected = {k: v for k, v in self.state_dict().items() if k.startswith(("conv_stem.", "bn1.", "blocks."))}
+        missing = [key for key, value in expected.items() if key not in state or state[key].shape != value.shape]
+        if missing:
+            raise ValueError(f"incompatible MobileNetV2 0.5 trunk tensors: {missing[:8]}")
+        self.load_state_dict({key: state[key] for key in expected}, strict=False)
+
+
+def build_lightstereo_backbone(source_root: str | Path, *, encoder_backbone: str = "v2") -> nn.Module:
     """Construct the official feature backbone without downloading weights."""
+    encoder_backbone_from_config({"encoder_backbone": encoder_backbone})
     _register_lightstereo_source(source_root)
     import timm
-    from stereo.modeling.models.lightstereo.backbone import Backbone
+    from stereo.modeling.models.lightstereo.backbone import Backbone, FPNLayer
+
+    if encoder_backbone == "v2-050":
+        from stereo.modeling.common.basic_block_2d import BasicConv2d
+        from timm.models.efficientnet import _gen_mobilenet_v2
+
+        trunk = _gen_mobilenet_v2("mobilenetv2_100", channel_multiplier=.5, pretrained=False, features_only=True)
+        return MobileNetV2HalfFpn(trunk, FPNLayer, BasicConv2d)
 
     create_model = timm.create_model
 

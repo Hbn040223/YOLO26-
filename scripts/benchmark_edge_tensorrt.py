@@ -151,8 +151,9 @@ def main():
     torch.manual_seed(manifest["seed"])
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
                                          crop_top_px=crop)
-    if manifest["backbone"] not in ("v2", "v3-small"):
-        parser.error(f"unknown manifest backbone {manifest['backbone']!r}")
+    if manifest["backbone"] != "v3-small":
+        from lightbackbone_stereo_yolo.lightstereo_encoder import encoder_backbone_from_config
+        encoder_backbone_from_config(bundle["config"], manifest["backbone"])
     normalization = bundle["normalization"]
     left, right, actual_geometry = load_rectified_pair(args.left, args.right, normalization, crop)
     if actual_geometry != geometry:

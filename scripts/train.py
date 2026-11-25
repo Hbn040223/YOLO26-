@@ -42,12 +42,16 @@ from lightbackbone_stereo_yolo.stereo_yolo26 import StereoYOLO26PanHead, initial
 from lightbackbone_stereo_yolo.anchorfree_training import (  # noqa: E402
     ONE_TO_ONE_ASSIGNMENT_MODES, one_to_one_assignment_mode_from_config, training_forward_anchorfree,
 )
-from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder  # noqa: E402
-from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead  # noqa: E402
+from lightbackbone_stereo_yolo.lightstereo_encoder import (  # noqa: E402
+    ENCODER_BACKBONES, LightStereoFeatureEncoder, build_lightstereo_backbone, encoder_backbone_from_config,
+)
+from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead, StereoYoloLocalModel  # noqa: E402
+from lightbackbone_stereo_yolo.roi_selection import Near10Policy  # noqa: E402
 from lightbackbone_stereo_yolo.roi import ROI_SAMPLING_MODES  # noqa: E402
 from lightbackbone_stereo_yolo.training import (  # noqa: E402
     StereoYoloTrainingModel,
     build_optimizer,
+    near10_selection_rank,
     set_backbone_trainable,
     training_forward,
     unfreeze_backbone_tail,
@@ -66,7 +70,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--train-json", required=True)
     parser.add_argument("--val-json", required=True)
     parser.add_argument("--lightstereo-source", required=True, help="OpenStereo source root")
-    parser.add_argument("--checkpoint", required=True, help="LightStereo-S-KITTI.ckpt")
+    parser.add_argument("--checkpoint", help="LightStereo-S-KITTI.ckpt for a fresh 1.0× model")
+    parser.add_argument("--encoder-backbone", choices=ENCODER_BACKBONES)
+    parser.add_argument("--encoder-init", type=str, help="local 0.5× timm state dict")
+    parser.add_argument("--near10-baseline-report", type=str, help="frozen 1.0× FP32 R2 report")
+    parser.add_argument("--calibration-zip", type=str)
+    parser.add_argument("--half-width-pilot", action="store_true", help="run 3–5 exploratory epochs")
     parser.add_argument("--output-dir", default=str(ROOT / "outputs" / "local_train"))
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--epochs", type=int, default=5)
@@ -259,6 +268,7 @@ def run_epoch(
     log,
     *,
     car_cohort: dict | None = None,
+    scheduler=None,
 ) -> dict[str, object]:
     totals = {key: 0. for key in LOSS_KEYS}
     pred_metrics = {"matched_count": 0., "target_count": 0., "iou_sum": 0., "iou_count": 0., "epe_sum": 0., "epe_count": 0., "d1_hit": 0., "d1_count": 0.}
@@ -278,6 +288,9 @@ def run_epoch(
         model.train()
         # The pretrained backbone keeps its inference BN statistics while fine-tuning.
         model.encoder.backbone.eval()
+        if getattr(args, "encoder_backbone", "v2") == "v2-050":
+            for name in ("fpn_layer2", "fpn_layer3", "fpn_layer4", "out_conv"):
+                getattr(model.encoder.backbone, name).train()
     else:
         model.eval()
     for step, batch in enumerate(loader):
@@ -293,6 +306,8 @@ def run_epoch(
                 if not torch.isfinite(gradient_norm):
                     raise RuntimeError("non-finite gradient norm")
                 optimizer.step()
+                if scheduler is not None:
+                    scheduler.step()
         frames += 1
         left_iou_total += float(output.get("loss_left_iou", 0.))
         for key in sparse_totals:
@@ -402,7 +417,8 @@ def run_epoch(
     return result
 
 
-def save_checkpoint(path: Path, model, optimizer, epoch, best, best_gt_roi_epe, args, class_mapping, detector_plateau=None, detector_checkpoint_selector=None) -> None:
+def save_checkpoint(path: Path, model, optimizer, epoch, best, best_gt_roi_epe, args, class_mapping,
+                    detector_plateau=None, detector_checkpoint_selector=None, *, extra=None) -> None:
     payload = {
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
@@ -415,6 +431,7 @@ def save_checkpoint(path: Path, model, optimizer, epoch, best, best_gt_roi_epe, 
         "normalization": {"mean": list(LIGHTSTEREO_KITTI_MEAN), "std": list(LIGHTSTEREO_KITTI_STD)},
         "config": vars(args),
         "detector_plateau": detector_plateau,
+        **(extra or {}),
     }
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(payload, temporary)
@@ -449,6 +466,20 @@ def main() -> None:
         if args.dmax_roi <= 0:
             args.dmax_roi = int(resume_payload["dmax_roi"])
     stored_config = resume_payload.get("config", {}) if resume_payload is not None else {}
+    args.encoder_backbone = (encoder_backbone_from_config(stored_config, args.encoder_backbone)
+                             if resume_payload is not None else args.encoder_backbone or "v2")
+    half = args.encoder_backbone == "v2-050"
+    if half and args.idisp_only:
+        raise SystemExit("half-width adaptation uses the joint training entry")
+    if half and not args.preflight and not (args.calibration_zip and args.near10_baseline_report):
+        raise SystemExit("half-width validation requires --calibration-zip and --near10-baseline-report")
+    if half and not args.preflight:
+        if args.half_width_pilot and not 3 <= args.epochs <= 5:
+            raise SystemExit("half-width pilot expects 3–5 epochs")
+        if not args.half_width_pilot and (args.epochs != 60 or args.limit_train_batches or args.limit_val_batches):
+            raise SystemExit("formal half-width training requires --epochs 60 and the full datasets")
+        if resume_payload is not None and bool(stored_config.get("half_width_pilot")) != args.half_width_pilot:
+            raise SystemExit("pilot and formal training require separate initializations")
     if args.idisp_only or stored_config.get("idisp_only"):
         from train_idisp_only import run
 
@@ -584,13 +615,35 @@ def main() -> None:
         KittiFrameDataset(val_frames, class_mapping, unknown_class="skip"), args.workers, shuffle=False
     )
 
-    encoder = LightStereoFeatureEncoder.from_checkpoint(
-        args.lightstereo_source, args.checkpoint, adapter_channels=args.adapter_channels
-    )
+    if not half and args.checkpoint:
+        encoder = LightStereoFeatureEncoder.from_checkpoint(
+            args.lightstereo_source, args.checkpoint, adapter_channels=args.adapter_channels)
+    else:
+        if not half and resume_payload is None:
+            raise SystemExit("fresh 1.0× training requires --checkpoint")
+        backbone = build_lightstereo_backbone(args.lightstereo_source, encoder_backbone=args.encoder_backbone)
+        if half and args.encoder_init and resume_payload is None:
+            backbone.load_trunk_state(torch.load(args.encoder_init, map_location="cpu", weights_only=True))
+        elif half and resume_payload is None and not args.preflight:
+            raise SystemExit("fresh half-width training requires --encoder-init")
+        encoder = LightStereoFeatureEncoder(backbone, args.adapter_channels)
+    initial = (torch.load(args.init_weights, map_location="cpu", weights_only=half) if args.init_weights else None)
+    template = resume_payload if resume_payload is not None else initial
+    args.mask_head_variant = (template or {}).get("config", {}).get("mask_head_variant", "light")
+    foreground_metadata = {}
+    if half:
+        if template is None or args.mask_head_variant != "context" or 26 not in template.get("foreground_mask_raw_classes", ()):
+            raise SystemExit("half-width training requires a Car context Mask checkpoint")
+        foreground_metadata = {key: template[key] for key in ("foreground_mask_raw_classes", "mask_threshold", "mask_evaluation")
+                               if key in template}
+        args.encoder_init_sha256 = stored_config.get("encoder_init_sha256")
+        if args.encoder_init and resume_payload is None:
+            args.encoder_init_sha256 = hashlib.sha256(Path(args.encoder_init).read_bytes()).hexdigest()
     detector = StereoYoloHead(args.adapter_channels, num_classes=len(class_mapping))
     if args.detector_variant == "stereo_yolo26_pan":
         detector = StereoYOLO26PanHead(args.adapter_channels, num_classes=len(class_mapping), one_to_one=args.one_to_one)
-    instance_head = StereoLocalInstanceHead(args.adapter_channels, args.dmax_roi, roi_sampling=args.roi_sampling)
+    instance_head = StereoLocalInstanceHead(args.adapter_channels, args.dmax_roi, roi_sampling=args.roi_sampling,
+                                           mask_head_variant=args.mask_head_variant)
     precision_floor = .9 * args.baseline_paired_precision
     detector_selector = DetectorCheckpointSelector(precision_floor)
     model = StereoYoloTrainingModel(encoder, detector, instance_head).to(args.device)
@@ -599,14 +652,44 @@ def main() -> None:
         args.init_weights = str(Path(args.init_weights).resolve())
         init_path = Path(args.init_weights)
         args.initial_weights_sha256 = hashlib.sha256(init_path.read_bytes()).hexdigest()
-        initial = torch.load(init_path, map_location="cpu", weights_only=False)
         if initial.get("class_mapping", class_mapping) != class_mapping:
             raise SystemExit("initial checkpoint class mapping differs from the current split")
-        state = initialize_one_to_one_weights(initial["model"]) if args.one_to_one else initial["model"]
-        model.load_state_dict(state)
+        if half:
+            config = initial["config"]
+            for key in ("adapter_channels", "detector_variant", "one_to_one", "right_offset_mode", "roi_sampling"):
+                if config.get(key) != getattr(args, key):
+                    raise SystemExit(f"incompatible downstream initialization: {key}")
+            if initial["dmax_roi"] != args.dmax_roi or config.get("one_to_one_only", False):
+                raise SystemExit("incompatible iDisp or detector-head layout")
+            prefixes = ("detector.", "instance_head.mask.", "instance_head.idisp.")
+            source = {key: value for key, value in initial["model"].items() if key.startswith(prefixes)}
+            expected = {key: value for key, value in model.state_dict().items() if key.startswith(prefixes)}
+            if set(source) != set(expected) or any(source[key].shape != value.shape for key, value in expected.items()):
+                raise SystemExit("downstream checkpoint tensors do not match")
+            model.load_state_dict(source, strict=False)
+            log(f"loaded {len(source)} downstream tensors; FPN and adapters initialized afresh")
+        else:
+            state = initialize_one_to_one_weights(initial["model"]) if args.one_to_one else initial["model"]
+            model.load_state_dict(state)
         del state, initial
-    set_backbone_trainable(encoder, False)
-    optimizer = build_optimizer(model, args.lr, args.weight_decay, args.backbone_lr_scale)
+    set_backbone_trainable(encoder, half)
+    optimizer = build_optimizer(model, args.lr, args.weight_decay, args.backbone_lr_scale,
+                                train_fpn_at_head_lr=half)
+    scheduler = None
+    if half:
+        steps_per_epoch = len(train_loader)
+        args.train_sha256 = hashlib.sha256(Path(args.train_json).read_bytes()).hexdigest()
+        if resume_payload is not None and (stored_config.get("train_sha256") != args.train_sha256
+                                          or resume_payload["steps_per_epoch"] != steps_per_epoch):
+            raise SystemExit("half-width resume requires the original training split and step count")
+        warmup = 3 * steps_per_epoch
+        total = 60 * steps_per_epoch
+        def lr_scale(step):
+            if step <= warmup:
+                return .1 + .9 * step / warmup
+            progress = min(1., (step - warmup) / (total - warmup))
+            return .1 + .45 * (1 + math.cos(math.pi * progress))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_scale)
 
     start_epoch, best, best_gt_roi_epe = 0, float("inf"), float("inf")
     detector_plateau = DetectorPlateauController(args.min_epochs_before_stop, args.plateau_patience, args.plateau_min_delta)
@@ -617,6 +700,8 @@ def main() -> None:
     if resume_payload is not None:
         model.load_state_dict(resume_payload["model"])
         optimizer.load_state_dict(resume_payload["optimizer"])
+        if scheduler is not None:
+            scheduler.load_state_dict(resume_payload["scheduler"])
         start_epoch = int(resume_payload["epoch"])
         best = float(resume_payload.get("best_val_loss", best))
         best_gt_roi_epe = float(resume_payload.get("best_gt_roi_epe", best_gt_roi_epe))
@@ -647,6 +732,9 @@ def main() -> None:
 
     if args.preflight:
         batch = next(iter(train_loader)); model.train(); model.encoder.backbone.eval()
+        if half:
+            for name in ("fpn_layer2", "fpn_layer3", "fpn_layer4", "out_conv"):
+                getattr(model.encoder.backbone, name).train()
         output = forward_batch(model, batch, args, collect_metrics=True); assert_finite_losses(output)
         optimizer.zero_grad(set_to_none=True); output["loss_total"].backward()
         gradient_info = assert_finite_gradients(model); torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip); optimizer.step(); assert_finite_parameters(model)
@@ -658,6 +746,37 @@ def main() -> None:
             report["one_to_one_assignment_counts"] = output["one_to_one_assignment_counts"]
         log(f"preflight passed: {json.dumps(report, ensure_ascii=False)}"); write_json(output_dir / "preflight.json", report); return
 
+    near10_state = (resume_payload or {}).get("near10_selection", {})
+    if half:
+        from zipfile import ZipFile
+        from benchmark_edge_stream import decoded_frames
+        from evaluate_edge_near10 import evaluate_r2_training, matched_ids
+        from infer import resolve_mask_threshold
+
+        norm = {"mean": LIGHTSTEREO_KITTI_MEAN, "std": LIGHTSTEREO_KITTI_STD}
+        reference_path = Path(args.near10_baseline_report)
+        args.reference_sha256 = hashlib.sha256(reference_path.read_bytes()).hexdigest()
+        args.val_sha256 = hashlib.sha256(Path(args.val_json).read_bytes()).hexdigest()
+        args.calibration_sha256 = hashlib.sha256(Path(args.calibration_zip).read_bytes()).hexdigest()
+        if resume_payload is not None and any(
+                getattr(args, key) != stored_config.get(key)
+                for key in ("reference_sha256", "val_sha256", "calibration_sha256", "lr", "backbone_lr_scale")):
+            raise SystemExit("half-width resume requires the original validation inputs and learning rates")
+        reference = json.loads(reference_path.read_text())
+        if (reference["protocol"]["split_sha256"] != args.val_sha256
+                or reference["protocol"]["calibration_sha256"] != args.calibration_sha256):
+            raise SystemExit("frozen baseline and validation inputs differ")
+        baseline = matched_ids(reference["frames"], "R2")
+        if len(baseline["Car"]) != 18:
+            raise SystemExit("frozen R2 baseline must identify the 18 matched near cars")
+        r2_dataset = KittiFrameDataset(val_frames, class_mapping, unknown_class="skip", load_images=False)
+        with ZipFile(args.calibration_zip) as archive:
+            r2_frames = decoded_frames(r2_dataset, archive)
+        r2_model = StereoYoloLocalModel(
+            encoder, detector, instance_head, detector_variant=args.detector_variant,
+            right_offset_mode=args.right_offset_mode, apply_paired_nms=True,
+            foreground_class_indices=(class_mapping[26],), mask_threshold=resolve_mask_threshold(foreground_metadata),
+            near10_policy=Near10Policy("range-dedup", class_mapping[26], 15., .50, .45))
     unfrozen = False
     for epoch in range(start_epoch, args.epochs):
         frame_order_sha256 = None
@@ -668,7 +787,8 @@ def main() -> None:
         if not unfrozen and 0 <= args.unfreeze_after_epoch <= epoch:
             names = unfreeze_backbone_tail(model.encoder); unfrozen = True; log(f"epoch {epoch}: unfroze backbone tail {names}")
         started = time.time()
-        train_metrics = run_epoch(model, train_loader, args, optimizer, args.limit_train_batches, False, log)
+        train_metrics = run_epoch(model, train_loader, args, optimizer, args.limit_train_batches, False, log,
+                                  scheduler=scheduler)
         with torch.no_grad():
             val_metrics = run_epoch(
                 model, val_loader, args, None, args.limit_val_batches, True, log, car_cohort=car_cohort,
@@ -680,6 +800,32 @@ def main() -> None:
         record = {"epoch": epoch, "train": train_metrics, "val": val_metrics, "seconds": round(time.time() - started, 1), "detector_plateau": state, "detector_selection": {"baseline_paired_precision": args.baseline_paired_precision, "precision_floor": precision_floor, "precision_qualified": bool(args.detector_metrics and val_metrics["paired_precision"] >= precision_floor), "selector": selection_state}}
         if frame_order_sha256 is not None:
             record["frame_order_sha256"] = frame_order_sha256
+        extras = None
+        if half:
+            results, frame_report = evaluate_r2_training(
+                r2_model.eval(), r2_dataset, r2_frames, norm, class_mapping, torch.device(args.device), baseline)
+            car = results["Car"]
+            row = {"epoch": epoch + 1, **{key: car[key] for key in (
+                "tp", "gt", "exactly_one_pair_targets", "new_missed_gt", "precision", "predicted")},
+                "foreground_coverage": car["foreground"]["pixel_coverage"], "epe": car["disparity"]["epe"],
+                "d1": car["disparity"]["d1"], "optimizer_steps": scheduler.last_epoch}
+            rank, qualified = near10_selection_rank(row)
+            previous = near10_state.get("rank")
+            improved_r2 = previous is None or rank > tuple(previous)
+            if improved_r2:
+                near10_state = {"rank": rank, "epoch": epoch + 1, "qualified": qualified}
+            extras = {**foreground_metadata, "scheduler": scheduler.state_dict(),
+                      "steps_per_epoch": steps_per_epoch, "optimizer_steps": scheduler.last_epoch,
+                      "near10_selection": near10_state, "near10_epoch": row}
+            write_json(output_dir / f"r2-epoch-{epoch + 1:03}.json", {"classes": results, "frames": frame_report})
+            append_jsonl_record(output_dir / "near10-epochs.jsonl", row)
+            log(f"epoch {epoch + 1} R2 {json.dumps(row)}")
+            if improved_r2:
+                name = "best_pilot.pt" if args.half_width_pilot else "best_r2.pt" if qualified else "best_diagnostic.pt"
+                save_checkpoint(output_dir / name, model, optimizer, epoch + 1, best, best_gt_roi_epe,
+                                args, class_mapping, extra=extras)
+            should_stop = (not args.half_width_pilot and epoch + 1 >= 30 and near10_state["qualified"]
+                           and epoch + 1 - near10_state["epoch"] >= 10)
         append_jsonl_record(metrics_path, record)
         log(f"epoch {epoch} train total={train_metrics['loss_total']:.4f} obj={train_metrics['loss_obj']:.4f} cls={train_metrics['loss_cls']:.4f} box6={train_metrics['loss_box6']:.4f} | val total={val_metrics['loss_total']:.4f} raw={val_metrics['raw_dense_left_recall']:.4f} pre001={val_metrics['pre_nms_left_recall']:.4f} deploy_left={val_metrics['deployment_left_recall']:.4f} paired={val_metrics['paired_coverage']:.4f} precision={val_metrics['paired_precision']:.4f} pairs={val_metrics['post_nms_pairs']:.0f} plateau={detector_plateau.plateau_counter}")
         if "loss_left_iou" in train_metrics:
@@ -691,6 +837,13 @@ def main() -> None:
         improved = val_metrics["loss_total"] < best; improved_epe = val_metrics["epe"] < best_gt_roi_epe
         if improved: best = val_metrics["loss_total"]
         if improved_epe: best_gt_roi_epe = val_metrics["epe"]
+        if half:
+            save_checkpoint(output_dir / "last.pt", model, optimizer, epoch + 1, best, best_gt_roi_epe,
+                            args, class_mapping, extra=extras)
+            if should_stop:
+                log(f"epoch {epoch + 1}: R2 plateau stop")
+                break
+            continue
         save_checkpoint(output_dir / "last.pt", model, optimizer, epoch + 1, best, best_gt_roi_epe, args, class_mapping, state, selection_state)
         if improved: save_checkpoint(output_dir / "best.pt", model, optimizer, epoch + 1, best, best_gt_roi_epe, args, class_mapping, state, selection_state)
         if improved_epe: save_checkpoint(output_dir / "best_gt_roi_epe.pt", model, optimizer, epoch + 1, best, best_gt_roi_epe, args, class_mapping, state, selection_state)

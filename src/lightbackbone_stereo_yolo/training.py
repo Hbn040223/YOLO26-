@@ -332,9 +332,20 @@ def unfreeze_backbone_tail(encoder: nn.Module) -> list[str]:
     return unfrozen
 
 
-def build_optimizer(model: nn.Module, lr: float, weight_decay: float, backbone_lr_scale: float) -> torch.optim.Optimizer:
+def near10_selection_rank(car):
+    qualified = (car["gt"] == 23 and car["tp"] >= 18 and car["exactly_one_pair_targets"] >= 17
+                 and car["new_missed_gt"] == 0)
+    quality = (car["foreground_coverage"], None if car["epe"] is None else -car["epe"],
+               None if car["d1"] is None else -car["d1"])
+    return ((qualified, -car["new_missed_gt"], car["tp"], car["exactly_one_pair_targets"],
+             *(value if value is not None else -1e30 for value in quality)), qualified)
+
+
+def build_optimizer(model: nn.Module, lr: float, weight_decay: float, backbone_lr_scale: float, *,
+                    train_fpn_at_head_lr=False) -> torch.optim.Optimizer:
     """Separate the pretrained backbone from newly initialized heads."""
-    backbone_ids = {id(parameter) for parameter in model.encoder.backbone.parameters()}
+    backbone_ids = {id(parameter) for name, parameter in model.encoder.backbone.named_parameters()
+                    if not train_fpn_at_head_lr or not name.startswith(("fpn_layer", "out_conv."))}
     backbone = [parameter for parameter in model.parameters() if id(parameter) in backbone_ids]
     heads = [parameter for parameter in model.parameters() if id(parameter) not in backbone_ids]
     return torch.optim.AdamW(

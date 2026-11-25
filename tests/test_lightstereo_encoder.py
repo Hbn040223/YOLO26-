@@ -28,6 +28,11 @@ except ModuleNotFoundError:
 
 @unittest.skipIf(torch is None, "PyTorch is required for encoder contract tests")
 class LightStereoFeatureEncoderContractTest(unittest.TestCase):
+    def test_unknown_encoder_variant_is_rejected_before_import(self):
+        from lightbackbone_stereo_yolo.lightstereo_encoder import build_lightstereo_backbone
+        with self.assertRaisesRegex(ValueError, "encoder backbone"):
+            build_lightstereo_backbone("unused", encoder_backbone="unknown")
+
     def test_shared_encoder_returns_eight_separated_native_scale_features(self) -> None:
         class TinyLightStereoBackbone(nn.Module):
             output_channels = (4, 6, 8, 10)

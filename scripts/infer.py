@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from lightbackbone_stereo_yolo.data.frame_dataset import normalized_rgb
-from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_backbone
+from lightbackbone_stereo_yolo.lightstereo_encoder import (
+    LightStereoFeatureEncoder, build_lightstereo_backbone, encoder_backbone_from_config,
+)
 from lightbackbone_stereo_yolo.mask import mask_logit_cutoff
 from lightbackbone_stereo_yolo.roi_selection import Near10Policy, RoiPairSelection
 from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead, StereoYoloLocalModel
@@ -50,7 +52,9 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
-    encoder = LightStereoFeatureEncoder(build_lightstereo_backbone(openstereo_source), channels)
+    variant = encoder_backbone_from_config(config)
+    encoder = LightStereoFeatureEncoder(
+        build_lightstereo_backbone(openstereo_source, encoder_backbone=variant), channels)
     detector = StereoYOLO26PanHead(
         channels, len(bundle["class_mapping"]), one_to_one=config["one_to_one"],
         one_to_one_only=config.get("one_to_one_only", False),

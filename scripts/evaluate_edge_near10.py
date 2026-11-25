@@ -2,6 +2,7 @@
 import argparse
 from collections import Counter
 from dataclasses import replace
+from pathlib import Path
 from time import perf_counter
 from zipfile import ZipFile
 
@@ -36,6 +37,9 @@ def frame_metrics(output, route, sample, depths, mapping, iou):
     kept_indices = torch.where(~ignored)[0]
     matches = {int(near_indices[t]): int(kept_indices[p]) for t, p in matching.items()}
     maps = projected(output, matches, sample)
+    car_label = mapping.get(26, -1)
+    foreground = projected(output, {t: p for t, p in matches.items()
+                                     if int(sample["classes"][t]) == car_label}, sample, foreground=True)
     truth = sample["disparity"]
     support = sample["masks"][:, 0] & sample["disparity_valid"] & torch.isfinite(truth) & (truth > 0)
     classes = {}
@@ -60,10 +64,13 @@ def frame_metrics(output, route, sample, depths, mapping, iou):
             "idisp_pairs": int((route["idisp"].classes == label).sum()), "targets": counts,
             "disparity": disparity_scores(fitted, truth, support & (same_class & near)[:, None, None]),
         }
+        if raw == 26:
+            car_support = support & (same_class & near)[:, None, None]
+            classes[name]["foreground"] = disparity_scores(foreground, truth, car_support)
     return classes, maps, support
 
 
-def summarize(frames, arm):
+def summarize(frames, arm, *, baseline=None):
     result = {}
     for name in CLASSES.values():
         rows = [frame["arms"][arm]["classes"][name] for frame in frames]
@@ -87,11 +94,11 @@ def summarize(frames, arm):
                            and target["idisp_ids"] == target["output_ids"] for target in targets)
             totals["exactly_one_pair_targets"] = complete
             totals["all_targets_exactly_one_pair"] = complete == gt if gt else None
+            totals["foreground"] = reduce_pixel_metrics([row["foreground"] for row in rows])
         totals["new_missed_gt"] = sum(
-            target["gt"] in {old["gt"] for old in frame["arms"]["R0"]["classes"][name]["targets"]
-                             if old["matched"]} and not target["matched"]
+            (frame["frame_id"], target["gt"]) in baseline[name] and not target["matched"]
             for frame, row in zip(frames, rows) for target in row["targets"])
-        if arm != "R0":
+        if arm != "R0" and "shared_pixel_errors" in frames[0]["arms"][arm]:
             totals["common_valid_pixels"] = {
                 key: reduce_pixel_metrics([frame["arms"][arm]["shared_pixel_errors"][name][key]
                                            for frame in frames])
@@ -101,11 +108,33 @@ def summarize(frames, arm):
     return result
 
 
+def matched_ids(frames, arm):
+    return {name: {(frame["frame_id"], target["gt"]) for frame in frames
+                   for target in frame["arms"][arm]["classes"][name]["targets"] if target["matched"]}
+            for name in CLASSES.values()}
+
+
+@torch.inference_mode()
+def evaluate_r2_training(model, dataset, frames, normalization, mapping, device, baseline):
+    rows = []
+    for (frame_id, frame), sample in zip(frames, dataset):
+        if sample["frame_id"] != frame_id:
+            raise ValueError("training evaluation frames do not align")
+        bf, cx = frame[2]
+        groups = _target_groups(sample, mapping, None, calibration={"bf_px_m": bf, "cx_delta_px": cx})
+        output, route, _ = infer_frame(model, frame, normalization, device, "fp32", trace=True)
+        metrics, _, _ = frame_metrics(output, route, sample, [g["depth_m"] for g in groups], mapping, .5)
+        rows.append({"frame_id": frame_id, "arms": {"R2": {"classes": metrics}}})
+    return summarize(rows, "R2", baseline=baseline), rows
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     add_input_arguments(parser)
     add_runtime_arguments(parser)
     parser.add_argument("--match-iou", type=float, default=.50)
+    parser.add_argument("--comparison-weights", type=Path,
+                        help="run a second checkpoint in R2 and compare common prediction pixels")
     parser.add_argument("--range-only", action="store_true", help="run R0 and R1 without Car foreground weights")
     args = parser.parse_args()
     if args.calibration_zip is None or not 0 < args.match_iou <= 1:
@@ -118,6 +147,16 @@ def main():
         near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou)
     mapping = bundle["class_mapping"]
+    comparison = None
+    if args.comparison_weights:
+        if args.range_only or args.engine_manifest:
+            parser.error("cross-checkpoint R2 comparison requires the native or AMP backend")
+        comparison, second = load_published_model(args.comparison_weights, args.openstereo_source, device,
+            apply_paired_nms=True, near10_mode="range-dedup", near10_prefilter_m=args.near10_prefilter_m,
+            near10_mask_iou=args.near10_mask_iou, near10_review_box_iou=args.near10_review_box_iou)
+        if second["class_mapping"] != mapping or second["normalization"] != bundle["normalization"]:
+            parser.error("comparison requires identical classes and input normalization")
+        comparison.instance_head.idisp.amp_aggregation = args.precision == "amp-fp16"
     dataset = validation_dataset(args.dataset_root, args.split_json, bundle, load_images=False)
     modes = {"R0": "baseline", "R1": "range"}
     if not args.range_only:
@@ -164,11 +203,34 @@ def main():
                             arm: disparity_scores({gt: maps[gt] for gt in targets}, sample["disparity"], mask),
                         }
                     row["arms"][arm]["shared_pixel_errors"] = errors
+            if comparison is not None:
+                other, other_route, _ = infer_frame(comparison, frame, bundle["normalization"], device,
+                                                     args.precision, trace=True)
+                second_metrics, second_maps, _ = frame_metrics(
+                    other, other_route, sample, [g["depth_m"] for g in groups], mapping, args.match_iou)
+                common = maps.keys() & second_maps.keys()
+                pixels = torch.zeros_like(support)
+                for gt in common:
+                    if int(sample["classes"][gt]) == mapping.get(26):
+                        pixels[gt] = support[gt] & maps[gt][1] & second_maps[gt][1]
+                row["comparison"] = {"car": second_metrics["Car"], "common_car_pixels": {
+                    "candidate": disparity_scores({gt: maps[gt] for gt in common}, sample["disparity"], pixels),
+                    "reference": disparity_scores({gt: second_maps[gt] for gt in common}, sample["disparity"], pixels)}}
             rows.append(row)
     if not rows:
         parser.error("the evaluation split contains no frames")
+    comparison_report = None
+    if comparison is not None:
+        old = {(row["frame_id"], target["gt"]) for row in rows for target in row["comparison"]["car"]["targets"]
+               if target["matched"]}
+        new = matched_ids(rows, "R2")["Car"]
+        comparison_report = {"weights_sha256": digest(args.comparison_weights), "new_missed_car_gt": sorted(old - new),
+                             "common_car_pixels": {key: reduce_pixel_metrics(
+                                 [row["comparison"]["common_car_pixels"][key] for row in rows])
+                                 for key in ("candidate", "reference")}}
     write_json(args.output, {
-        "frames": rows, "arms": {arm: summarize(rows, arm) for arm in modes},
+        "cross_checkpoint_r2": comparison_report,
+        "frames": rows, "arms": {arm: summarize(rows, arm, baseline=matched_ids(rows, "R0")) for arm in modes},
         "protocol": {**evidence, "precision": args.precision,
                      "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
                      "split_sha256": digest(args.split_json), "calibration_sha256": digest(args.calibration_zip),

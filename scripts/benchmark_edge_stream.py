@@ -91,7 +91,7 @@ def load_frontends(manifests, precision, device, evidence):
     for path in manifests:
         manifest = json.loads(path.read_text(encoding="utf-8"))
         geometry = manifest_geometry(manifest)
-        if (manifest["backbone"] != "v2" or geometry.crop_top_px
+        if (manifest["backbone"] != evidence.get("encoder_backbone", "v2") or geometry.crop_top_px
                 or any(manifest[field] != evidence[field] for field in ("openstereo_commit", "weights_sha256"))):
             raise ValueError(f"engine manifest does not match the full-frame V2 model: {path}")
         if geometry.original_hw in frontends:
@@ -187,7 +187,10 @@ def configure_runtime(parser, args, model, frames, device, evidence):
     model.instance_head.idisp.amp_aggregation = args.precision == "amp-fp16"
     if not args.engine_manifest:
         return None
-    frontends = load_frontends(args.engine_manifest, args.precision.removeprefix("trt-"), device, evidence)
+    from lightbackbone_stereo_yolo.lightstereo_encoder import MobileNetV2HalfFpn
+    backbone = "v2-050" if isinstance(model.encoder.backbone, MobileNetV2HalfFpn) else "v2"
+    frontends = load_frontends(args.engine_manifest, args.precision.split("-", 1)[1], device,
+                              {**evidence, "encoder_backbone": backbone})
     sizes = {(frame[0].height, frame[0].width) for _, frame in frames}
     missing = sizes.difference(frontends)
     if missing:

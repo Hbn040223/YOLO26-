@@ -18,7 +18,9 @@ from benchmark_edge_acceleration import revision
 from evaluate_paired_nms import sha256, write_json
 from infer import ROOT, load_published_model
 from lightbackbone_stereo_yolo.edge_deployment import FRONTEND_OUTPUTS, FRONTEND_SCHEMA, StaticStereoFrontend
-from lightbackbone_stereo_yolo.lightstereo_encoder import LightStereoFeatureEncoder, build_lightstereo_v3small
+from lightbackbone_stereo_yolo.lightstereo_encoder import (
+    LightStereoFeatureEncoder, build_lightstereo_v3small, encoder_backbone_from_config,
+)
 from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry
 
 
@@ -54,7 +56,7 @@ def main():
     parser.add_argument("--height", type=int, default=375, help="original image height")
     parser.add_argument("--width", type=int, default=1242)
     parser.add_argument("--crop-top-px", type=int, default=0)
-    parser.add_argument("--backbone", choices=("v2", "v3-small"), default="v2")
+    parser.add_argument("--backbone", choices=("v2", "v2-050", "v3-small"))
     parser.add_argument("--seed", type=int, default=17, help="seed for the unadapted V3-Small prototype")
     parser.add_argument("--trtexec", help="build FP32 and FP16 engines with this TensorRT 8.6–10.x executable")
     parser.add_argument("--output", type=Path, required=True, help="static .onnx file")
@@ -67,6 +69,8 @@ def main():
     torch.manual_seed(args.seed)
     geometry = StereoInputGeometry((args.height, args.width), args.crop_top_px)
     model, bundle = load_published_model(args.weights, args.openstereo_source, "cpu")
+    if args.backbone != "v3-small":
+        args.backbone = encoder_backbone_from_config(bundle["config"], args.backbone)
     if args.backbone == "v3-small":
         model.encoder = LightStereoFeatureEncoder(build_lightstereo_v3small(args.openstereo_source),
                                                  bundle["config"]["adapter_channels"]).eval()

@@ -13,6 +13,17 @@ train_script=importlib.util.module_from_spec(spec); sys.modules["train_checkpoin
 
 
 class CheckpointPayloadTest(unittest.TestCase):
+    def test_half_width_ranking_protects_original_near_targets(self):
+        from lightbackbone_stereo_yolo.training import near10_selection_rank
+        result = {"tp": 18, "gt": 23, "exactly_one_pair_targets": 17,
+                  "new_missed_gt": 1, "foreground_coverage": .8,
+                  "epe": 2., "d1": .1}
+        rank, qualified = near10_selection_rank(result)
+        self.assertFalse(qualified)
+        fixed, qualified = near10_selection_rank({**result, "new_missed_gt": 0})
+        self.assertTrue(qualified)
+        self.assertGreater(fixed, rank)
+
     def test_checkpoint_persists_best_gt_roi_epe_for_resume(self):
         model=torch.nn.Linear(2,1)
         optimizer=torch.optim.SGD(model.parameters(),lr=.1)
