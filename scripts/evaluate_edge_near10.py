@@ -13,7 +13,7 @@ from diagnose_pred_roi import _target_groups
 from edge_run_evidence import digest, serialize_route, source_info
 from evaluate_edge_acceleration import CLASSES, disparity_scores, make_pairs, match, projected, reduce_pixel_metrics
 from evaluate_paired_nms import validation_dataset, write_json
-from infer import ROOT, load_published_model
+from infer import ROOT, load_published_model, parse_score_threshold
 from lightbackbone_stereo_yolo.roi_selection import subset_pairs
 from lightbackbone_stereo_yolo.training_metrics import paired_match_eligibility
 
@@ -89,6 +89,7 @@ def summarize(frames, arm, *, baseline=None):
             counts = [len(target[stage + "_ids"]) for target in targets]
             totals[stage + "_distribution"] = {key: counts.count(n) for key, n in (("zero", 0), ("one", 1))}
             totals[stage + "_distribution"]["multiple"] = sum(count > 1 for count in counts)
+            totals[stage + "_extra_pairs"] = sum(max(count - 1, 0) for count in counts)
         if name == "Car":
             complete = sum(not target["ambiguous"] and len(target["idisp_ids"]) == 1
                            and target["idisp_ids"] == target["output_ids"] for target in targets)
@@ -114,6 +115,11 @@ def matched_ids(frames, arm):
             for name in CLASSES.values()}
 
 
+def score_trace(route):
+    return {stage: dict(zip(pairs.indices.tolist(), pairs.scores.tolist()))
+            for stage in ("pre_nms", "idisp", "near10_final") if (pairs := route.get(stage)) is not None}
+
+
 @torch.inference_mode()
 def evaluate_r2_training(model, dataset, frames, normalization, mapping, device, baseline):
     rows = []
@@ -135,14 +141,19 @@ def main():
     parser.add_argument("--match-iou", type=float, default=.50)
     parser.add_argument("--comparison-weights", type=Path,
                         help="run a second checkpoint in R2 and compare common prediction pixels")
+    parser.add_argument("--comparison-score", type=parse_score_threshold,
+                        help="threshold for --comparison-weights; defaults to --score")
     parser.add_argument("--range-only", action="store_true", help="run R0 and R1 without Car foreground weights")
     args = parser.parse_args()
     if args.calibration_zip is None or not 0 < args.match_iou <= 1:
         parser.error("a calibration zip and match IoU in (0, 1] are required")
+    if args.comparison_score is not None and args.comparison_weights is None:
+        parser.error("--comparison-score requires --comparison-weights")
     torch.set_num_threads(2)
     torch.backends.cudnn.deterministic = True
     device = torch.device(args.device)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
+        score=args.score,
         near10_mode="range" if args.range_only else "range-dedup",
         near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou)
@@ -152,6 +163,7 @@ def main():
         if args.range_only or args.engine_manifest:
             parser.error("cross-checkpoint R2 comparison requires the native or AMP backend")
         comparison, second = load_published_model(args.comparison_weights, args.openstereo_source, device,
+            score=args.score if args.comparison_score is None else args.comparison_score,
             apply_paired_nms=True, near10_mode="range-dedup", near10_prefilter_m=args.near10_prefilter_m,
             near10_mask_iou=args.near10_mask_iou, near10_review_box_iou=args.near10_review_box_iou)
         if second["class_mapping"] != mapping or second["normalization"] != bundle["normalization"]:
@@ -188,6 +200,8 @@ def main():
                     metrics[name]["unknown_gt"] += annotated[raw] - paired_targets[mapping.get(raw, -1)]
                 row["arms"][arm] = {"classes": metrics, "route": serialize_route(route),
                                     "timings": {**timings, "frame_ms": elapsed}}
+                if arm == "R2":
+                    row["arms"][arm]["candidate_scores"] = score_trace(route)
                 if arm == "R0":
                     reference = maps
                 else:
@@ -213,7 +227,9 @@ def main():
                 for gt in common:
                     if int(sample["classes"][gt]) == mapping.get(26):
                         pixels[gt] = support[gt] & maps[gt][1] & second_maps[gt][1]
-                row["comparison"] = {"car": second_metrics["Car"], "common_car_pixels": {
+                row["comparison"] = {"car": second_metrics["Car"], "classes": second_metrics,
+                                     "route": serialize_route(other_route), "candidate_scores": score_trace(other_route),
+                                     "common_car_pixels": {
                     "candidate": disparity_scores({gt: maps[gt] for gt in common}, sample["disparity"], pixels),
                     "reference": disparity_scores({gt: second_maps[gt] for gt in common}, sample["disparity"], pixels)}}
             rows.append(row)
@@ -221,17 +237,21 @@ def main():
         parser.error("the evaluation split contains no frames")
     comparison_report = None
     if comparison is not None:
-        old = {(row["frame_id"], target["gt"]) for row in rows for target in row["comparison"]["car"]["targets"]
-               if target["matched"]}
-        new = matched_ids(rows, "R2")["Car"]
-        comparison_report = {"weights_sha256": digest(args.comparison_weights), "new_missed_car_gt": sorted(old - new),
+        baseline = {name: {(row["frame_id"], target["gt"]) for row in rows
+                           for target in row["comparison"]["classes"][name]["targets"] if target["matched"]}
+                    for name in CLASSES.values()}
+        actual = matched_ids(rows, "R2")
+        missed = {name: sorted(baseline[name] - actual[name]) for name in CLASSES.values()}
+        comparison_report = {"weights_sha256": digest(args.comparison_weights), "score": comparison.score_threshold,
+                             "new_missed_car_gt": missed["Car"], "new_missed_gt_by_class": missed,
                              "common_car_pixels": {key: reduce_pixel_metrics(
                                  [row["comparison"]["common_car_pixels"][key] for row in rows])
                                  for key in ("candidate", "reference")}}
     write_json(args.output, {
         "cross_checkpoint_r2": comparison_report,
         "frames": rows, "arms": {arm: summarize(rows, arm, baseline=matched_ids(rows, "R0")) for arm in modes},
-        "protocol": {**evidence, "precision": args.precision,
+        "protocol": {**evidence, "precision": args.precision, "score": model.score_threshold,
+                     "paired_nms_iou": model.paired_nms_iou, "pre_nms_topk": model.pre_nms_topk,
                      "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
                      "split_sha256": digest(args.split_json), "calibration_sha256": digest(args.calibration_zip),
                      "match_iou": args.match_iou, "near_m": 10., "prefilter_m": args.near10_prefilter_m,

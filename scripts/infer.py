@@ -27,6 +27,13 @@ from lightbackbone_stereo_yolo.stereo_input import StereoInputGeometry, load_rec
 from edge_run_evidence import capture_route, serialize_route, source_info
 
 
+def parse_score_threshold(value):
+    score = float(value)
+    if not 0 <= score <= 1:
+        raise argparse.ArgumentTypeError("score must be finite and in [0, 1]")
+    return score
+
+
 def resolve_mask_threshold(bundle, override=None):
     # The published E25 stores bias-folded logits. New exports store raw logits.
     if override is None:
@@ -92,7 +99,7 @@ def main() -> None:
     parser.add_argument("--left", type=Path, required=True)
     parser.add_argument("--right", type=Path, required=True)
     parser.add_argument("--device", default="cuda:0")
-    parser.add_argument("--score", type=float, default=.40)
+    parser.add_argument("--score", type=parse_score_threshold, default=.40)
     parser.add_argument("--paired-nms", action="store_true", help="opt in to class-aware stereo pair suppression")
     parser.add_argument("--paired-nms-iou", type=float, default=.5)
     parser.add_argument("--crop-top-px", type=int, default=0, help="crop this many rows from both rectified images")

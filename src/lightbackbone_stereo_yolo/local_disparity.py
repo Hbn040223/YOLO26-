@@ -87,6 +87,10 @@ class RegularizedIDispHead(nn.Module):
         return self._aggregate_by_native_size(cost, attention, metadata, spatial_valid)
 
     def forward(self, left: Tensor, right: Tensor, attention: AttentionPyramid, metadata: CropMetadata, spatial_valid: Tensor) -> RoiDisparity:
+        with record_function("stereo.idisp"):
+            return self._forward(left, right, attention, metadata, spatial_valid)
+
+    def _forward(self, left, right, attention, metadata, spatial_valid):
         with record_function("stereo.cost_volume"):
             volume = build_local_cost_volume(left, right, self.search, spatial_valid, self.temperature)
         amp = torch.autocast("cuda", dtype=torch.float16) if self.amp_aggregation else nullcontext()

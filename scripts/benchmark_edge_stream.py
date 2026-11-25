@@ -15,7 +15,7 @@ import torch
 from diagnose_pred_roi import _rectified_calibration
 from edge_run_evidence import digest, source_info
 from evaluate_paired_nms import validation_dataset, write_json
-from infer import ROOT, load_published_model
+from infer import ROOT, load_published_model, parse_score_threshold
 from lightbackbone_stereo_yolo.stereo_input import prepare_rectified_images
 
 
@@ -124,7 +124,8 @@ def infer_frame(model, frame, normalization, device, precision, frontends=None, 
     else:
         amp = torch.autocast("cuda", dtype=torch.float16) if precision == "amp-fp16" else nullcontext()
         with record_function("stereo.frontend"), amp:
-            pyramid = model.encoder(l, r)
+            with record_function("stereo.encoder"):
+                pyramid = model.encoder(l, r)
             dense = model.detector(pyramid)
     # Keep geometric decoding and RoI coordinates in FP32 for all frontends.
     if precision != "fp32" or frontends is not None:
@@ -165,6 +166,7 @@ def add_input_arguments(parser):
     parser.add_argument("--split-json", type=Path, required=True)
     parser.add_argument("--calibration-zip", type=Path)
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--score", type=parse_score_threshold, default=.40)
     parser.add_argument("--near10-prefilter-m", type=float, default=15.)
     parser.add_argument("--near10-mask-iou", type=float, default=.60)
     parser.add_argument("--near10-review-box-iou", type=float,
@@ -214,6 +216,7 @@ def main():
     torch.backends.cudnn.deterministic = True
     evidence = source_info(ROOT, __file__, args.openstereo_source, args.weights)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
+        score=args.score,
         near10_mode=args.near10_policy if args.calibration_zip else None,
         near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou)
@@ -235,8 +238,26 @@ def main():
             activities.append(torch.profiler.ProfilerActivity.CUDA)
         profile_rows = []
         for frame_id, frame in frames:
-            with torch.profiler.profile(activities=activities) as profiler:
-                infer(frame)
+            events = []
+            if device.type == "cuda":
+                def begin_idisp(*_):
+                    start, end = (torch.cuda.Event(enable_timing=True) for _ in range(2))
+                    start.record(torch.cuda.current_stream(device))
+                    events.append((start, end))
+
+                def end_idisp(*_):
+                    events[-1][1].record(torch.cuda.current_stream(device))
+
+                head = model.instance_head.idisp
+                handles = [head.register_forward_pre_hook(begin_idisp), head.register_forward_hook(end_idisp)]
+            else:
+                handles = []
+            try:
+                with torch.profiler.profile(activities=activities) as profiler:
+                    infer(frame)
+            finally:
+                for handle in handles:
+                    handle.remove()
             spans = {}
             for event in profiler.key_averages():
                 if event.key.startswith("stereo."):
@@ -244,13 +265,18 @@ def main():
                                    else event.cuda_time_total)
                     spans[event.key] = {"cpu_ms": event.cpu_time_total / 1000,
                                         "cuda_ms": device_time / 1000, "calls": event.count}
-            profile_rows.append({"frame_id": frame_id, "spans": spans})
+            profile_rows.append({"frame_id": frame_id, "spans": spans,
+                                 "idisp_cuda_elapsed_ms": sum(start.elapsed_time(end) for start, end in events)
+                                 if device.type == "cuda" else None})
         report["profile_rows"] = profile_rows
         report["profile_p95_ms"] = {
             name: {key: float(np.percentile([row["spans"].get(name, {}).get(key, 0.) for row in profile_rows], 95))
                    for key in ("cpu_ms", "cuda_ms")}
             for name in sorted({name for row in profile_rows for name in row["spans"]})
         }
+        if device.type == "cuda":
+            report["profile_idisp_cuda_elapsed_p95_ms"] = float(np.percentile(
+                [row["idisp_cuda_elapsed_ms"] for row in profile_rows], 95))
     report["protocol"] = {
         **evidence, "device": str(device), "torch": torch.__version__, "cuda": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
@@ -258,7 +284,8 @@ def main():
         "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
         "calibration_sha256": digest(args.calibration_zip) if args.calibration_zip else None,
         "prefilter_m": args.near10_prefilter_m, "mask_iou": args.near10_mask_iou,
-        "review_box_iou": args.near10_review_box_iou,
+        "review_box_iou": args.near10_review_box_iou, "score": model.score_threshold,
+        "paired_nms_iou": model.paired_nms_iou, "pre_nms_topk": model.pre_nms_topk,
     }
     write_json(args.output, report)
 
