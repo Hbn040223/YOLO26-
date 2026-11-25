@@ -668,10 +668,12 @@ def main() -> None:
                 raise SystemExit("downstream checkpoint tensors do not match")
             model.load_state_dict(source, strict=False)
             log(f"loaded {len(source)} downstream tensors; FPN and adapters initialized afresh")
+            del source, expected
         else:
             state = initialize_one_to_one_weights(initial["model"]) if args.one_to_one else initial["model"]
             model.load_state_dict(state)
-        del state, initial
+            del state
+        del initial, template
     set_backbone_trainable(encoder, half)
     optimizer = build_optimizer(model, args.lr, args.weight_decay, args.backbone_lr_scale,
                                 train_fpn_at_head_lr=half)
