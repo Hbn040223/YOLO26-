@@ -1,0 +1,178 @@
+{
+  "commit": "d865aa9ff9ff82d3b708fecf57aca9ef88382c8a",
+  "checkpoint": "outputs/v2-050/formal/best_r2.pt",
+  "gpu": "Orin",
+  "frame": "kitti2015_000000_10.png",
+  "score": 0.4,
+  "paired_nms_iou": 0.5,
+  "warmups_per_arm": 5,
+  "timed_runs_per_arm": 7,
+  "profiled_runs_per_arm": 3,
+  "method": "Alternating order, same loaded model and on-device images. Synchronized forward latency. Separate synchronized stage profiles. AMP uses FP16 autocast for encoder, detector and local aggregation, with FP32 geometry.",
+  "arms": {
+    "fp32": {
+      "forward_ms": [
+        309.2119350003486,
+        311.6188700000748,
+        295.7298789997367,
+        405.7020069999453,
+        359.49897299997247,
+        423.91107399998873,
+        371.38600200023575
+      ],
+      "forward_median_ms": 359.49897299997247,
+      "profile_samples_ms": [
+        {
+          "encoder": 132.9863490000207,
+          "detector": 20.79681300028824,
+          "paired_nms": 6.283188999987033,
+          "stereo.roi_sample": 14.308974999948987,
+          "stereo.cost_volume": 78.42325399997208,
+          "stereo.local_aggregation": 69.4877309997537,
+          "stereo.disparity_regression": 4.491727000186074,
+          "stereo.idisp": 153.14034099992568,
+          "stereo.mask": 12.764753999817913,
+          "decode_and_refine": 202.4866829997336
+        },
+        {
+          "encoder": 145.93947299999854,
+          "detector": 18.00969099986105,
+          "paired_nms": 9.919136999997136,
+          "stereo.roi_sample": 15.347092000411067,
+          "stereo.cost_volume": 73.8242430002174,
+          "stereo.local_aggregation": 74.32413400010773,
+          "stereo.disparity_regression": 6.504668000161473,
+          "stereo.idisp": 155.28417399991667,
+          "stereo.mask": 6.45385100006024,
+          "decode_and_refine": 197.81907400010823
+        },
+        {
+          "encoder": 117.85766399998465,
+          "detector": 17.62247600026967,
+          "paired_nms": 7.36620599991511,
+          "stereo.roi_sample": 20.032617999731883,
+          "stereo.cost_volume": 91.2394150000182,
+          "stereo.local_aggregation": 82.02820900032748,
+          "stereo.disparity_regression": 3.8269970000328613,
+          "stereo.idisp": 177.9803509998601,
+          "stereo.mask": 6.287284000336513,
+          "decode_and_refine": 232.6655470001242
+        }
+      ],
+      "stage_medians_ms": {
+        "encoder": 132.9863490000207,
+        "detector": 18.00969099986105,
+        "paired_nms": 7.36620599991511,
+        "stereo.roi_sample": 15.347092000411067,
+        "stereo.cost_volume": 78.42325399997208,
+        "stereo.local_aggregation": 74.32413400010773,
+        "stereo.disparity_regression": 4.491727000186074,
+        "stereo.idisp": 155.28417399991667,
+        "stereo.mask": 6.45385100006024,
+        "decode_and_refine": 202.4866829997336
+      },
+      "pre_nms": 58,
+      "post_nms": 11,
+      "output_pair_ids": [
+        9461,
+        8329,
+        9448,
+        8339,
+        8391,
+        3575,
+        3885,
+        3527,
+        3832,
+        3888,
+        8205
+      ]
+    },
+    "amp-fp16": {
+      "forward_ms": [
+        325.08660100029374,
+        359.83213600002273,
+        276.0145730003387,
+        347.22613500025545,
+        350.25176099998134,
+        412.10348599997815,
+        300.4195809999146
+      ],
+      "forward_median_ms": 347.22613500025545,
+      "profile_samples_ms": [
+        {
+          "encoder": 80.98805100007667,
+          "detector": 23.329324999849632,
+          "cast_to_fp32": 4.220260000238341,
+          "paired_nms": 5.831170999954338,
+          "stereo.roi_sample": 17.790548999983002,
+          "stereo.cost_volume": 102.03767100028927,
+          "stereo.local_aggregation": 117.42790200014497,
+          "stereo.disparity_regression": 3.969819000303687,
+          "stereo.idisp": 224.35584400000153,
+          "stereo.mask": 12.478694000037649,
+          "decode_and_refine": 272.7781779999532
+        },
+        {
+          "encoder": 97.51707900022666,
+          "detector": 24.097546999655606,
+          "cast_to_fp32": 3.877463000208081,
+          "paired_nms": 7.681003000016062,
+          "stereo.roi_sample": 17.874967999887303,
+          "stereo.cost_volume": 89.04193299986218,
+          "stereo.local_aggregation": 104.1751299999305,
+          "stereo.disparity_regression": 10.855495000214432,
+          "stereo.idisp": 206.19312000007994,
+          "stereo.mask": 10.51128900007825,
+          "decode_and_refine": 254.59113399983835
+        },
+        {
+          "encoder": 70.28084100011256,
+          "detector": 21.25007299991921,
+          "cast_to_fp32": 2.036590999978216,
+          "paired_nms": 11.06772599996475,
+          "stereo.roi_sample": 16.306713000176387,
+          "stereo.cost_volume": 82.57911000009699,
+          "stereo.local_aggregation": 90.05328900002496,
+          "stereo.disparity_regression": 9.375724000165064,
+          "stereo.idisp": 184.00573700000677,
+          "stereo.mask": 5.656635999912396,
+          "decode_and_refine": 234.3574520000402
+        }
+      ],
+      "stage_medians_ms": {
+        "encoder": 80.98805100007667,
+        "detector": 23.329324999849632,
+        "cast_to_fp32": 3.877463000208081,
+        "paired_nms": 7.681003000016062,
+        "stereo.roi_sample": 17.790548999983002,
+        "stereo.cost_volume": 89.04193299986218,
+        "stereo.local_aggregation": 104.1751299999305,
+        "stereo.disparity_regression": 9.375724000165064,
+        "stereo.idisp": 206.19312000007994,
+        "stereo.mask": 10.51128900007825,
+        "decode_and_refine": 254.59113399983835
+      },
+      "pre_nms": 59,
+      "post_nms": 11,
+      "output_pair_ids": [
+        9461,
+        8329,
+        9448,
+        8339,
+        8391,
+        3575,
+        3885,
+        3527,
+        3832,
+        3888,
+        8205
+      ]
+    }
+  },
+  "comparison": {
+    "common_pair_ids": 11,
+    "same_pair_order": true,
+    "common_valid_disparity_mae_px": 0.03603912889957428,
+    "common_valid_disparity_max_px": 2.203573226928711
+  }
+}

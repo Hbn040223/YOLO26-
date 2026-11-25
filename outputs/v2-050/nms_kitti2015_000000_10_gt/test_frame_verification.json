@@ -1,0 +1,12 @@
+{
+  "left": {
+    "local": "8b945d4c6a33924eae528b935414b12be24911a293c4033bf34f5b896407b521",
+    "official_testing": "8b945d4c6a33924eae528b935414b12be24911a293c4033bf34f5b896407b521",
+    "official_training": "569d7ca5556f18dfa589ffd9e26d9c835ca73d5994d9ba0fa6d2fd2b6016529f"
+  },
+  "right": {
+    "local": "364f6b1b758c55014885a3dc9081408e889b7d8669c2ea6b64e37b270296ac60",
+    "official_testing": "364f6b1b758c55014885a3dc9081408e889b7d8669c2ea6b64e37b270296ac60",
+    "official_training": "e4cc806e04a17c146c0aa0435f543bc13e6c9f6d6f1fa57d969429a37bc27a35"
+  }
+}
