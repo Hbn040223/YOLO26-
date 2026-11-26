@@ -1,0 +1,220 @@
+{
+  "commit": "ff0e78aa42dc5b2a3a5adabf0a47a3b4164b4182",
+  "dirty": true,
+  "entry": "/home/tensorlab/local/YOLO26-/scripts/infer.py",
+  "model_module": "/home/tensorlab/local/YOLO26-/src/lightbackbone_stereo_yolo/model.py",
+  "encoder_module": "/home/tensorlab/local/YOLO26-/src/lightbackbone_stereo_yolo/lightstereo_encoder.py",
+  "openstereo_commit": "23d71c92e33ad1f80dfc42bf29f5c6a914d38769",
+  "weights_sha256": "dd9990d5435d5da9696437009449bda4713d5d41a196a2d495e7363a3abd8095",
+  "original_hw": [
+    375,
+    1242
+  ],
+  "cropped_hw": [
+    375,
+    1242
+  ],
+  "crop_top_px": 0,
+  "encoder_padded_hw": [
+    384,
+    1248
+  ],
+  "weights": "outputs/v2-050/formal/best_r2.pt",
+  "frame": "000004_10",
+  "split": "training",
+  "ground_truth_cars": [
+    {
+      "id": 5,
+      "depth_m": 34.26241604456825,
+      "valid_pixels": 457,
+      "box": [
+        485,
+        169,
+        524,
+        209
+      ]
+    },
+    {
+      "id": 6,
+      "depth_m": 28.617612610346264,
+      "valid_pixels": 228,
+      "box": [
+        429,
+        167,
+        493,
+        204
+      ]
+    },
+    {
+      "id": 7,
+      "depth_m": 18.538368289374528,
+      "valid_pixels": 2203,
+      "box": [
+        689,
+        151,
+        861,
+        233
+      ]
+    },
+    {
+      "id": 8,
+      "depth_m": 14.136138324953311,
+      "valid_pixels": 10455,
+      "box": [
+        580,
+        128,
+        690,
+        257
+      ]
+    },
+    {
+      "id": 9,
+      "depth_m": 22.9267611556384,
+      "valid_pixels": 673,
+      "box": [
+        383,
+        170,
+        488,
+        220
+      ]
+    },
+    {
+      "id": 10,
+      "depth_m": 16.000269736585366,
+      "valid_pixels": 1440,
+      "box": [
+        734,
+        175,
+        817,
+        239
+      ]
+    },
+    {
+      "id": 11,
+      "depth_m": 17.357851275357206,
+      "valid_pixels": 1018,
+      "box": [
+        326,
+        172,
+        437,
+        242
+      ]
+    },
+    {
+      "id": 12,
+      "depth_m": 11.542716584164223,
+      "valid_pixels": 4008,
+      "box": [
+        793,
+        176,
+        959,
+        267
+      ]
+    },
+    {
+      "id": 13,
+      "depth_m": 14.08756748460988,
+      "valid_pixels": 1771,
+      "box": [
+        171,
+        174,
+        423,
+        261
+      ]
+    },
+    {
+      "id": 14,
+      "depth_m": 7.5629589485819695,
+      "valid_pixels": 1765,
+      "box": [
+        908,
+        186,
+        1002,
+        312
+      ]
+    },
+    {
+      "id": 15,
+      "depth_m": 11.586207333097846,
+      "valid_pixels": 2688,
+      "box": [
+        203,
+        197,
+        388,
+        284
+      ]
+    },
+    {
+      "id": 17,
+      "depth_m": 8.532182335905663,
+      "valid_pixels": 4360,
+      "box": [
+        57,
+        207,
+        312,
+        324
+      ]
+    },
+    {
+      "id": 18,
+      "depth_m": 5.7484319943918685,
+      "valid_pixels": 4989,
+      "box": [
+        0,
+        209,
+        178,
+        375
+      ]
+    }
+  ],
+  "left_sha256": "ae49b914c22f2c8850e2468cd03c2d5e93d9176d3f90a6150254b18e673337dc",
+  "right_sha256": "2fb9503d6d19166b3169d2580b14df50ba880e2df5855b6eb95be9e4102e4b1e",
+  "device": "cuda:0",
+  "gpu": "Orin",
+  "torch": "2.8.0",
+  "timm": "0.4.12",
+  "precision": "fp32",
+  "input_path": "prepared",
+  "score": 0.48,
+  "topk": 500,
+  "paired_nms_iou": 0.5,
+  "near10_policy": "range",
+  "near10_prefilter_m": 15.0,
+  "calibration_member": "training/calib_cam_to_cam/000004.txt",
+  "calibration_archive_sha256": "9e98e52a250718c62115673a36633c8ceab655f76442791deca79259a56c9689",
+  "bf_px_m": 384.38148,
+  "cx_delta_px": 0.0,
+  "warmup_iterations": 5,
+  "timed_frames": 3,
+  "warmup_total_ms": 2964.534,
+  "method": "Synchronized wall-clock with inputs already on GPU. NMS timing is included in forward.",
+  "forward_samples_ms": [
+    414.956,
+    462.274,
+    402.232
+  ],
+  "paired_nms_samples_ms": [
+    8.639,
+    9.819,
+    9.982
+  ],
+  "forward_median_ms": 414.956,
+  "paired_nms_median_ms": 9.819,
+  "counts": {
+    "pre_nms": 114,
+    "post_nms": 25,
+    "idisp": 9,
+    "range_far": 16,
+    "range_unknown": 0,
+    "range_invalid": 0,
+    "range_kept": 9,
+    "near10_unknown": 0,
+    "near10_final": 5
+  },
+  "class_mapping": {
+    "24": 0,
+    "26": 1,
+    "27": 2,
+    "28": 3
+  }
+}

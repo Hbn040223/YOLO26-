@@ -1,0 +1,90 @@
+{
+  "backbone_inputs": [
+    [
+      2,
+      3,
+      384,
+      1248
+    ]
+  ],
+  "nms_calls": [
+    {
+      "pairs": 36,
+      "iou": 0.5,
+      "class_aware": true
+    }
+  ],
+  "idisp_inputs": [
+    [
+      2,
+      96,
+      56,
+      56
+    ]
+  ],
+  "apply_nms": true,
+  "class_aware_nms": true,
+  "pre_nms_pair_ids": [
+    3657,
+    3658,
+    3659,
+    3812,
+    3813,
+    3814,
+    3815,
+    3968,
+    3969,
+    3970,
+    3971,
+    3972,
+    4124,
+    4125,
+    4126,
+    4127,
+    8225,
+    8226,
+    8302,
+    8303,
+    8304,
+    8380,
+    8381,
+    8382,
+    8458,
+    8459,
+    9523,
+    9524,
+    9525,
+    9526,
+    9562,
+    9563,
+    9564,
+    9604,
+    9642,
+    9643
+  ],
+  "post_nms_pair_ids": [
+    8303,
+    9524,
+    3657,
+    9642
+  ],
+  "idisp_pair_ids": [
+    9524,
+    9642
+  ],
+  "range_far_pair_ids": [
+    8303,
+    3657
+  ],
+  "range_unknown_pair_ids": [],
+  "range_invalid_pair_ids": [],
+  "range_kept_pair_ids": [
+    9524,
+    9642
+  ],
+  "near10_unknown_pair_ids": [],
+  "near10_final_pair_ids": [
+    9524,
+    9642
+  ]
+}

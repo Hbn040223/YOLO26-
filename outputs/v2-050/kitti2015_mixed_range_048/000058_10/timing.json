@@ -1,0 +1,99 @@
+{
+  "commit": "ff0e78aa42dc5b2a3a5adabf0a47a3b4164b4182",
+  "dirty": true,
+  "entry": "/home/tensorlab/local/YOLO26-/scripts/infer.py",
+  "model_module": "/home/tensorlab/local/YOLO26-/src/lightbackbone_stereo_yolo/model.py",
+  "encoder_module": "/home/tensorlab/local/YOLO26-/src/lightbackbone_stereo_yolo/lightstereo_encoder.py",
+  "openstereo_commit": "23d71c92e33ad1f80dfc42bf29f5c6a914d38769",
+  "weights_sha256": "dd9990d5435d5da9696437009449bda4713d5d41a196a2d495e7363a3abd8095",
+  "original_hw": [
+    375,
+    1242
+  ],
+  "cropped_hw": [
+    375,
+    1242
+  ],
+  "crop_top_px": 0,
+  "encoder_padded_hw": [
+    384,
+    1248
+  ],
+  "weights": "outputs/v2-050/formal/best_r2.pt",
+  "frame": "000058_10",
+  "split": "training",
+  "ground_truth_cars": [
+    {
+      "id": 1,
+      "depth_m": 21.44761527462947,
+      "valid_pixels": 2590,
+      "box": [
+        534,
+        181,
+        606,
+        230
+      ]
+    },
+    {
+      "id": 3,
+      "depth_m": 5.094572036241264,
+      "valid_pixels": 42219,
+      "box": [
+        21,
+        191,
+        457,
+        375
+      ]
+    }
+  ],
+  "left_sha256": "1793cc6eda23d518ce8a5a5ad15f7dd66a8d93f01ef353c9ed3db4f226aab2e5",
+  "right_sha256": "55a7f54bd15dddfbb04f70acd3183e1844a75359dc410668d2752b15753cc7a9",
+  "device": "cuda:0",
+  "gpu": "Orin",
+  "torch": "2.8.0",
+  "timm": "0.4.12",
+  "precision": "fp32",
+  "input_path": "prepared",
+  "score": 0.48,
+  "topk": 500,
+  "paired_nms_iou": 0.5,
+  "near10_policy": "range",
+  "near10_prefilter_m": 15.0,
+  "calibration_member": "training/calib_cam_to_cam/000058.txt",
+  "calibration_archive_sha256": "9e98e52a250718c62115673a36633c8ceab655f76442791deca79259a56c9689",
+  "bf_px_m": 384.38148,
+  "cx_delta_px": 0.0,
+  "warmup_iterations": 5,
+  "timed_frames": 3,
+  "warmup_total_ms": 2276.217,
+  "method": "Synchronized wall-clock with inputs already on GPU. NMS timing is included in forward.",
+  "forward_samples_ms": [
+    245.733,
+    292.287,
+    302.39
+  ],
+  "paired_nms_samples_ms": [
+    10.082,
+    9.477,
+    10.506
+  ],
+  "forward_median_ms": 292.287,
+  "paired_nms_median_ms": 10.082,
+  "counts": {
+    "pre_nms": 36,
+    "post_nms": 4,
+    "idisp": 2,
+    "range_far": 2,
+    "range_unknown": 0,
+    "range_invalid": 0,
+    "range_kept": 2,
+    "near10_unknown": 0,
+    "near10_final": 2
+  },
+  "class_mapping": {
+    "24": 0,
+    "26": 1,
+    "27": 2,
+    "28": 3
+  }
+}

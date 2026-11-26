@@ -1,0 +1,5137 @@
+{
+  "source": {
+    "commit": "ff0e78aa42dc5b2a3a5adabf0a47a3b4164b4182",
+    "dirty": true,
+    "entry": "/home/tensorlab/local/YOLO26-/scripts/infer.py",
+    "model_module": "/home/tensorlab/local/YOLO26-/src/lightbackbone_stereo_yolo/model.py",
+    "encoder_module": "/home/tensorlab/local/YOLO26-/src/lightbackbone_stereo_yolo/lightstereo_encoder.py",
+    "openstereo_commit": "23d71c92e33ad1f80dfc42bf29f5c6a914d38769",
+    "weights_sha256": "dd9990d5435d5da9696437009449bda4713d5d41a196a2d495e7363a3abd8095"
+  },
+  "device": "Orin",
+  "torch": "2.8.0",
+  "score": 0.48,
+  "paired_nms_iou": 0.5,
+  "prefilter_m": 15,
+  "final_cutoff_m": 10,
+  "warmups_per_variant_per_frame": 5,
+  "timed_rounds": 5,
+  "goal_forward_ms": 200,
+  "method": "Rotate variant order with synchronized forwards. Stage probes use a separate synchronized pass and add overhead. Baseline skips 15 m filtering and retains final 10 m selection. Left-only GT IoU is a diagnostic, not bilateral recall.",
+  "gate_200_ms": {
+    "000058_10": false,
+    "000004_10": false,
+    "000005_10": false
+  },
+  "foreground_class_indices": [
+    1
+  ],
+  "variants": {
+    "range_fp32": [
+      "range",
+      0,
+      false
+    ],
+    "baseline_fp32": [
+      "baseline",
+      0,
+      false
+    ],
+    "range_amp": [
+      "range",
+      0,
+      true
+    ],
+    "range_crop96": [
+      "range",
+      96,
+      false
+    ],
+    "range_crop96_amp": [
+      "range",
+      96,
+      true
+    ],
+    "range_dedup_fp32": [
+      "range-dedup",
+      0,
+      false
+    ]
+  },
+  "frames": {
+    "000058_10": {
+      "range_fp32": {
+        "counts": {
+          "pre_nms": 36,
+          "post_nms": 4,
+          "idisp": 2,
+          "range_far": 2,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 2,
+          "near10_unknown": 0,
+          "near10_final": 2
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 36,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              2,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3657,
+            3658,
+            3659,
+            3812,
+            3813,
+            3814,
+            3815,
+            3968,
+            3969,
+            3970,
+            3971,
+            3972,
+            4124,
+            4125,
+            4126,
+            4127,
+            8225,
+            8226,
+            8302,
+            8303,
+            8304,
+            8380,
+            8381,
+            8382,
+            8458,
+            8459,
+            9523,
+            9524,
+            9525,
+            9526,
+            9562,
+            9563,
+            9564,
+            9604,
+            9642,
+            9643
+          ],
+          "post_nms_pair_ids": [
+            8303,
+            9524,
+            3657,
+            9642
+          ],
+          "idisp_pair_ids": [
+            9524,
+            9642
+          ],
+          "range_far_pair_ids": [
+            8303,
+            3657
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9524,
+            9642
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9524,
+            9642
+          ]
+        },
+        "output_ids": [
+          9524,
+          9642
+        ],
+        "outputs": [
+          {
+            "pair_id": 9524,
+            "class_index": 1,
+            "distance_m": 5.672807216644287,
+            "score": 0.5931272506713867,
+            "best_near_car_left_iou": 0.4125205753210745,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              148.06204223632812,
+              218.0457305908203,
+              424.73809814453125,
+              337.6587219238281
+            ]
+          },
+          {
+            "pair_id": 9642,
+            "class_index": 1,
+            "distance_m": 5.379030704498291,
+            "score": 0.4926360249519348,
+            "best_near_car_left_iou": 0.620798025492981,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              120.62825012207031,
+              214.27664184570312,
+              493.8507080078125,
+              377.5164489746094
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          3
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          3
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 281.10540800025774,
+        "forward_samples_ms": [
+          242.55792799976916,
+          328.19763499992405,
+          281.10540800025774,
+          253.99646100004247,
+          310.9944580000956
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0,
+        "stage_medians_ms": {
+          "cost_volume": 27.20294999971884,
+          "decode_and_refine": 119.16200500036211,
+          "detector": 27.49152700016566,
+          "disparity_regression": 2.9789190002702526,
+          "encoder": 160.4237120000107,
+          "idisp": 59.05778599981204,
+          "local_aggregation": 26.925316999950155,
+          "mask": 5.234253000253375,
+          "near10_measure": 1.2161950003246602,
+          "near10_range": 7.499284000004991,
+          "roi_sample": 17.83486200019979
+        }
+      },
+      "baseline_fp32": {
+        "counts": {
+          "pre_nms": 36,
+          "post_nms": 4,
+          "idisp": 4,
+          "range_far": 2,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 4,
+          "near10_unknown": 0,
+          "near10_final": 2
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 36,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              4,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3657,
+            3658,
+            3659,
+            3812,
+            3813,
+            3814,
+            3815,
+            3968,
+            3969,
+            3970,
+            3971,
+            3972,
+            4124,
+            4125,
+            4126,
+            4127,
+            8225,
+            8226,
+            8302,
+            8303,
+            8304,
+            8380,
+            8381,
+            8382,
+            8458,
+            8459,
+            9523,
+            9524,
+            9525,
+            9526,
+            9562,
+            9563,
+            9564,
+            9604,
+            9642,
+            9643
+          ],
+          "post_nms_pair_ids": [
+            8303,
+            9524,
+            3657,
+            9642
+          ],
+          "idisp_pair_ids": [
+            8303,
+            9524,
+            3657,
+            9642
+          ],
+          "range_far_pair_ids": [
+            8303,
+            3657
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            8303,
+            9524,
+            3657,
+            9642
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9524,
+            9642
+          ]
+        },
+        "output_ids": [
+          9524,
+          9642
+        ],
+        "outputs": [
+          {
+            "pair_id": 9524,
+            "class_index": 1,
+            "distance_m": 5.672929286956787,
+            "score": 0.5931272506713867,
+            "best_near_car_left_iou": 0.4125205753210745,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              148.06204223632812,
+              218.0457305908203,
+              424.73809814453125,
+              337.6587219238281
+            ]
+          },
+          {
+            "pair_id": 9642,
+            "class_index": 1,
+            "distance_m": 5.379058361053467,
+            "score": 0.4926360249519348,
+            "best_near_car_left_iou": 0.620798025492981,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              120.62825012207031,
+              214.27664184570312,
+              493.8507080078125,
+              377.5164489746094
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          3
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          3
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 263.57000400003017,
+        "forward_samples_ms": [
+          250.7100249999894,
+          251.11155700005838,
+          313.4214779997819,
+          263.57000400003017,
+          334.11460499974055
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0022079460322856903
+      },
+      "range_amp": {
+        "counts": {
+          "pre_nms": 36,
+          "post_nms": 4,
+          "idisp": 2,
+          "range_far": 2,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 2,
+          "near10_unknown": 0,
+          "near10_final": 2
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 36,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              2,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3657,
+            3658,
+            3659,
+            3812,
+            3813,
+            3814,
+            3815,
+            3968,
+            3969,
+            3970,
+            3971,
+            3972,
+            4124,
+            4125,
+            4126,
+            4127,
+            8225,
+            8226,
+            8302,
+            8303,
+            8304,
+            8380,
+            8381,
+            8382,
+            8458,
+            8459,
+            9523,
+            9524,
+            9525,
+            9526,
+            9562,
+            9563,
+            9564,
+            9604,
+            9642,
+            9643
+          ],
+          "post_nms_pair_ids": [
+            8303,
+            9524,
+            3657,
+            9642
+          ],
+          "idisp_pair_ids": [
+            9524,
+            9642
+          ],
+          "range_far_pair_ids": [
+            8303,
+            3657
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9524,
+            9642
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9524,
+            9642
+          ]
+        },
+        "output_ids": [
+          9524,
+          9642
+        ],
+        "outputs": [
+          {
+            "pair_id": 9524,
+            "class_index": 1,
+            "distance_m": 5.670505046844482,
+            "score": 0.592961311340332,
+            "best_near_car_left_iou": 0.4117976790677633,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              148.02117919921875,
+              218.02838134765625,
+              424.5072937011719,
+              337.5137939453125
+            ]
+          },
+          {
+            "pair_id": 9642,
+            "class_index": 1,
+            "distance_m": 5.384896278381348,
+            "score": 0.49189066886901855,
+            "best_near_car_left_iou": 0.6209164740046189,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              120.71000671386719,
+              214.22711181640625,
+              493.69061279296875,
+              377.5528564453125
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          3
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          3
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 233.04145500014783,
+        "forward_samples_ms": [
+          219.06509200016444,
+          194.74749300024996,
+          233.30947199974617,
+          233.04145500014783,
+          247.53706499996042
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.3788909912109375,
+        "output_disparity_mean_abs_diff_px": 0.22096936404705048,
+        "stage_medians_ms": {
+          "cost_volume": 27.944535999722575,
+          "decode_and_refine": 132.23366900001565,
+          "detector": 23.127433999889035,
+          "disparity_regression": 3.532587000336207,
+          "encoder": 114.8318539999309,
+          "idisp": 66.52344400026777,
+          "local_aggregation": 32.2034949999761,
+          "mask": 4.760462999911397,
+          "near10_measure": 2.2518149999086745,
+          "near10_range": 5.696721999811416,
+          "roi_sample": 16.021683000417397
+        }
+      },
+      "range_crop96": {
+        "counts": {
+          "pre_nms": 35,
+          "post_nms": 4,
+          "idisp": 2,
+          "range_far": 2,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 2,
+          "near10_unknown": 0,
+          "near10_final": 2
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              288,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 35,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              2,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            1785,
+            1786,
+            1787,
+            1940,
+            1941,
+            1942,
+            1943,
+            2096,
+            2097,
+            2098,
+            2099,
+            2100,
+            2252,
+            2253,
+            2254,
+            2255,
+            5885,
+            5886,
+            5962,
+            5963,
+            5964,
+            6040,
+            6041,
+            6118,
+            6119,
+            7066,
+            7067,
+            7068,
+            7069,
+            7105,
+            7106,
+            7107,
+            7147,
+            7185,
+            7186
+          ],
+          "post_nms_pair_ids": [
+            5963,
+            7067,
+            1785,
+            7147
+          ],
+          "idisp_pair_ids": [
+            7067,
+            7147
+          ],
+          "range_far_pair_ids": [
+            5963,
+            1785
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            7067,
+            7147
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            7067,
+            7147
+          ]
+        },
+        "output_ids": [
+          7067,
+          7147
+        ],
+        "outputs": [
+          {
+            "pair_id": 7067,
+            "class_index": 1,
+            "distance_m": 5.670043468475342,
+            "score": 0.5938674211502075,
+            "best_near_car_left_iou": 0.41461773573487964,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              147.5867462158203,
+              218.02584838867188,
+              425.4288635253906,
+              337.74237060546875
+            ]
+          },
+          {
+            "pair_id": 7147,
+            "class_index": 1,
+            "distance_m": 5.550783634185791,
+            "score": 0.4831084907054901,
+            "best_near_car_left_iou": 0.6399013247356027,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              139.90463256835938,
+              193.72201538085938,
+              493.4553527832031,
+              383.47845458984375
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          3
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          3
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 236.88089400002355,
+        "forward_samples_ms": [
+          250.30548100039596,
+          198.69759700031864,
+          206.8131469995933,
+          236.88089400002355,
+          290.88293699987844
+        ],
+        "matches_current_output_ids": false,
+        "stage_medians_ms": {
+          "cost_volume": 21.376208000219776,
+          "decode_and_refine": 122.80007800018211,
+          "detector": 19.22249400013243,
+          "disparity_regression": 2.853067000160081,
+          "encoder": 117.77205499993215,
+          "idisp": 54.71591700006684,
+          "local_aggregation": 27.24563899982968,
+          "mask": 4.53649500013853,
+          "near10_measure": 1.18806799991944,
+          "near10_range": 6.452759999774571,
+          "roi_sample": 14.053300999876228
+        }
+      },
+      "range_crop96_amp": {
+        "counts": {
+          "pre_nms": 35,
+          "post_nms": 4,
+          "idisp": 2,
+          "range_far": 2,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 2,
+          "near10_unknown": 0,
+          "near10_final": 2
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              288,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 35,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              2,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            1785,
+            1786,
+            1787,
+            1940,
+            1941,
+            1942,
+            1943,
+            2096,
+            2097,
+            2098,
+            2099,
+            2100,
+            2252,
+            2253,
+            2254,
+            2255,
+            5885,
+            5886,
+            5962,
+            5963,
+            5964,
+            6040,
+            6041,
+            6118,
+            6119,
+            7066,
+            7067,
+            7068,
+            7069,
+            7105,
+            7106,
+            7107,
+            7147,
+            7185,
+            7186
+          ],
+          "post_nms_pair_ids": [
+            5963,
+            7067,
+            1785,
+            7147
+          ],
+          "idisp_pair_ids": [
+            7067,
+            7147
+          ],
+          "range_far_pair_ids": [
+            5963,
+            1785
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            7067,
+            7147
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            7067,
+            7147
+          ]
+        },
+        "output_ids": [
+          7067,
+          7147
+        ],
+        "outputs": [
+          {
+            "pair_id": 7067,
+            "class_index": 1,
+            "distance_m": 5.669020175933838,
+            "score": 0.5933736562728882,
+            "best_near_car_left_iou": 0.4136151341688685,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              147.56353759765625,
+              218.02838134765625,
+              425.04864501953125,
+              337.60906982421875
+            ]
+          },
+          {
+            "pair_id": 7147,
+            "class_index": 1,
+            "distance_m": 5.555451393127441,
+            "score": 0.4824444055557251,
+            "best_near_car_left_iou": 0.6400969919423918,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              139.9412841796875,
+              193.65286254882812,
+              493.43695068359375,
+              383.471923828125
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          3
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          3
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 178.42647199995554,
+        "forward_samples_ms": [
+          196.98768399985056,
+          168.20457900030306,
+          178.42647199995554,
+          165.96156399964457,
+          206.86759299996993
+        ],
+        "matches_current_output_ids": false
+      },
+      "range_dedup_fp32": {
+        "counts": {
+          "pre_nms": 36,
+          "post_nms": 4,
+          "idisp": 2,
+          "range_far": 2,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 2,
+          "near10_unknown": 0,
+          "near10_final": 2
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 36,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              2,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3657,
+            3658,
+            3659,
+            3812,
+            3813,
+            3814,
+            3815,
+            3968,
+            3969,
+            3970,
+            3971,
+            3972,
+            4124,
+            4125,
+            4126,
+            4127,
+            8225,
+            8226,
+            8302,
+            8303,
+            8304,
+            8380,
+            8381,
+            8382,
+            8458,
+            8459,
+            9523,
+            9524,
+            9525,
+            9526,
+            9562,
+            9563,
+            9564,
+            9604,
+            9642,
+            9643
+          ],
+          "post_nms_pair_ids": [
+            8303,
+            9524,
+            3657,
+            9642
+          ],
+          "idisp_pair_ids": [
+            9524,
+            9642
+          ],
+          "range_far_pair_ids": [
+            8303,
+            3657
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9524,
+            9642
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9524,
+            9642
+          ]
+        },
+        "output_ids": [
+          9524,
+          9642
+        ],
+        "outputs": [
+          {
+            "pair_id": 9524,
+            "class_index": 1,
+            "distance_m": 5.672807216644287,
+            "score": 0.5931272506713867,
+            "best_near_car_left_iou": 0.4125205753210745,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              148.06204223632812,
+              218.0457305908203,
+              424.73809814453125,
+              337.6587219238281
+            ]
+          },
+          {
+            "pair_id": 9642,
+            "class_index": 1,
+            "distance_m": 5.379030704498291,
+            "score": 0.4926360249519348,
+            "best_near_car_left_iou": 0.620798025492981,
+            "best_near_car_gt_id": 3,
+            "boxes_left": [
+              120.62825012207031,
+              214.27664184570312,
+              493.8507080078125,
+              377.5164489746094
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          3
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          3
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 268.2934849999583,
+        "forward_samples_ms": [
+          268.2934849999583,
+          358.0611060001502,
+          267.6954690000457,
+          261.0935560001053,
+          319.57350599986967
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0
+      }
+    },
+    "000004_10": {
+      "range_fp32": {
+        "counts": {
+          "pre_nms": 114,
+          "post_nms": 25,
+          "idisp": 9,
+          "range_far": 16,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 114,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            563,
+            1810,
+            1811,
+            1965,
+            1966,
+            1967,
+            2122,
+            2123,
+            3487,
+            3488,
+            3489,
+            3490,
+            3495,
+            3498,
+            3499,
+            3500,
+            3501,
+            3519,
+            3522,
+            3629,
+            3630,
+            3643,
+            3644,
+            3645,
+            3650,
+            3651,
+            3675,
+            3677,
+            3799,
+            3800,
+            3801,
+            3806,
+            3807,
+            8073,
+            8074,
+            8150,
+            8151,
+            8152,
+            8217,
+            8218,
+            8228,
+            8229,
+            8291,
+            8294,
+            8295,
+            8296,
+            8306,
+            8307,
+            8316,
+            8369,
+            8384,
+            8385,
+            8394,
+            8406,
+            8483,
+            8484,
+            9411,
+            9412,
+            9413,
+            9422,
+            9423,
+            9445,
+            9447,
+            9450,
+            9451,
+            9452,
+            9457,
+            9458,
+            9461,
+            9462,
+            9463,
+            9464,
+            9465,
+            9466,
+            9483,
+            9484,
+            9485,
+            9486,
+            9487,
+            9488,
+            9489,
+            9496,
+            9497,
+            9501,
+            9502,
+            9503,
+            9504,
+            9505,
+            9522,
+            9523,
+            9524,
+            9525,
+            9526,
+            9527,
+            9549,
+            9556,
+            9561,
+            9562,
+            9563,
+            9586,
+            9587,
+            9588,
+            9589,
+            9590,
+            9595,
+            9596,
+            9597,
+            9626,
+            9627,
+            9628,
+            9629,
+            9635,
+            9636,
+            9667
+          ],
+          "post_nms_pair_ids": [
+            9462,
+            1966,
+            9486,
+            3498,
+            8217,
+            3488,
+            9504,
+            9627,
+            8151,
+            9522,
+            9451,
+            9596,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9496,
+            8484,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "idisp_pair_ids": [
+            9462,
+            9486,
+            9504,
+            9627,
+            8151,
+            9522,
+            9596,
+            9496,
+            8484
+          ],
+          "range_far_pair_ids": [
+            1966,
+            3498,
+            8217,
+            3488,
+            9451,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9462,
+            9486,
+            9504,
+            9627,
+            8151,
+            9522,
+            9596,
+            9496,
+            8484
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9486,
+            9627,
+            9522,
+            9596,
+            8484
+          ]
+        },
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "outputs": [
+          {
+            "pair_id": 9486,
+            "class_index": 1,
+            "distance_m": 9.919342994689941,
+            "score": 0.7052016258239746,
+            "best_near_car_left_iou": 0.3390071175077398,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              134.61285400390625,
+              181.16433715820312,
+              434.84112548828125,
+              300.8818664550781
+            ]
+          },
+          {
+            "pair_id": 9627,
+            "class_index": 1,
+            "distance_m": 4.6318206787109375,
+            "score": 0.6354318261146545,
+            "best_near_car_left_iou": 0.09440666271598586,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              950.2562255859375,
+              156.29534912109375,
+              1242.7374267578125,
+              374.20892333984375
+            ]
+          },
+          {
+            "pair_id": 9522,
+            "class_index": 1,
+            "distance_m": 8.477540016174316,
+            "score": 0.6073144674301147,
+            "best_near_car_left_iou": 0.6817432646281504,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              45.24729919433594,
+              186.76055908203125,
+              354.4974060058594,
+              328.2732238769531
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 7.3028411865234375,
+            "score": 0.5973749756813049,
+            "best_near_car_left_iou": 0.6601770924827159,
+            "best_near_car_gt_id": 18,
+            "boxes_left": [
+              -25.325721740722656,
+              198.88104248046875,
+              228.7909393310547,
+              375.0115051269531
+            ]
+          },
+          {
+            "pair_id": 8484,
+            "class_index": 1,
+            "distance_m": 7.598742961883545,
+            "score": 0.5461277365684509,
+            "best_near_car_left_iou": 0.5668765898769633,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              915.7035522460938,
+              197.74893188476562,
+              993.7171020507812,
+              283.81201171875
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          14,
+          17,
+          18
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          14,
+          17,
+          18
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 372.2268390001773,
+        "forward_samples_ms": [
+          331.7505390000406,
+          427.50958200031164,
+          372.2268390001773,
+          370.52519500002745,
+          448.7120439998762
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0,
+        "stage_medians_ms": {
+          "cost_volume": 70.34225100005642,
+          "decode_and_refine": 214.45677099973182,
+          "detector": 20.460875000026135,
+          "disparity_regression": 8.550337000087893,
+          "encoder": 173.06091999989803,
+          "idisp": 141.8861580000339,
+          "local_aggregation": 65.20951299989974,
+          "mask": 6.960706999961985,
+          "near10_measure": 3.496964000078151,
+          "near10_range": 6.727389999923616,
+          "roi_sample": 20.4028160001144
+        }
+      },
+      "baseline_fp32": {
+        "counts": {
+          "pre_nms": 114,
+          "post_nms": 25,
+          "idisp": 25,
+          "range_far": 16,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 25,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 114,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              25,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            563,
+            1810,
+            1811,
+            1965,
+            1966,
+            1967,
+            2122,
+            2123,
+            3487,
+            3488,
+            3489,
+            3490,
+            3495,
+            3498,
+            3499,
+            3500,
+            3501,
+            3519,
+            3522,
+            3629,
+            3630,
+            3643,
+            3644,
+            3645,
+            3650,
+            3651,
+            3675,
+            3677,
+            3799,
+            3800,
+            3801,
+            3806,
+            3807,
+            8073,
+            8074,
+            8150,
+            8151,
+            8152,
+            8217,
+            8218,
+            8228,
+            8229,
+            8291,
+            8294,
+            8295,
+            8296,
+            8306,
+            8307,
+            8316,
+            8369,
+            8384,
+            8385,
+            8394,
+            8406,
+            8483,
+            8484,
+            9411,
+            9412,
+            9413,
+            9422,
+            9423,
+            9445,
+            9447,
+            9450,
+            9451,
+            9452,
+            9457,
+            9458,
+            9461,
+            9462,
+            9463,
+            9464,
+            9465,
+            9466,
+            9483,
+            9484,
+            9485,
+            9486,
+            9487,
+            9488,
+            9489,
+            9496,
+            9497,
+            9501,
+            9502,
+            9503,
+            9504,
+            9505,
+            9522,
+            9523,
+            9524,
+            9525,
+            9526,
+            9527,
+            9549,
+            9556,
+            9561,
+            9562,
+            9563,
+            9586,
+            9587,
+            9588,
+            9589,
+            9590,
+            9595,
+            9596,
+            9597,
+            9626,
+            9627,
+            9628,
+            9629,
+            9635,
+            9636,
+            9667
+          ],
+          "post_nms_pair_ids": [
+            9462,
+            1966,
+            9486,
+            3498,
+            8217,
+            3488,
+            9504,
+            9627,
+            8151,
+            9522,
+            9451,
+            9596,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9496,
+            8484,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "idisp_pair_ids": [
+            9462,
+            1966,
+            9486,
+            3498,
+            8217,
+            3488,
+            9504,
+            9627,
+            8151,
+            9522,
+            9451,
+            9596,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9496,
+            8484,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "range_far_pair_ids": [
+            1966,
+            3498,
+            8217,
+            3488,
+            9451,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9462,
+            1966,
+            9486,
+            3498,
+            8217,
+            3488,
+            9504,
+            9627,
+            8151,
+            9522,
+            9451,
+            9596,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9496,
+            8484,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9486,
+            9627,
+            9522,
+            9596,
+            8484
+          ]
+        },
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "outputs": [
+          {
+            "pair_id": 9486,
+            "class_index": 1,
+            "distance_m": 9.919425964355469,
+            "score": 0.7052016258239746,
+            "best_near_car_left_iou": 0.3390071175077398,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              134.61285400390625,
+              181.16433715820312,
+              434.84112548828125,
+              300.8818664550781
+            ]
+          },
+          {
+            "pair_id": 9627,
+            "class_index": 1,
+            "distance_m": 4.63165807723999,
+            "score": 0.6354318261146545,
+            "best_near_car_left_iou": 0.09440666271598586,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              950.2562255859375,
+              156.29534912109375,
+              1242.7374267578125,
+              374.20892333984375
+            ]
+          },
+          {
+            "pair_id": 9522,
+            "class_index": 1,
+            "distance_m": 8.478049278259277,
+            "score": 0.6073144674301147,
+            "best_near_car_left_iou": 0.6817432646281504,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              45.24729919433594,
+              186.76055908203125,
+              354.4974060058594,
+              328.2732238769531
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 7.302888870239258,
+            "score": 0.5973749756813049,
+            "best_near_car_left_iou": 0.6601770924827159,
+            "best_near_car_gt_id": 18,
+            "boxes_left": [
+              -25.325721740722656,
+              198.88104248046875,
+              228.7909393310547,
+              375.0115051269531
+            ]
+          },
+          {
+            "pair_id": 8484,
+            "class_index": 1,
+            "distance_m": 7.598784446716309,
+            "score": 0.5461277365684509,
+            "best_near_car_left_iou": 0.5668765898769633,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              915.7035522460938,
+              197.74893188476562,
+              993.7171020507812,
+              283.81201171875
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          14,
+          17,
+          18
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          14,
+          17,
+          18
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 667.6008979998187,
+        "forward_samples_ms": [
+          588.7590719999025,
+          778.2110370003466,
+          667.6008979998187,
+          835.5397200002699,
+          609.1701569998804
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.002434643916785717
+      },
+      "range_amp": {
+        "counts": {
+          "pre_nms": 113,
+          "post_nms": 25,
+          "idisp": 9,
+          "range_far": 16,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 113,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            563,
+            1810,
+            1811,
+            1965,
+            1966,
+            1967,
+            2122,
+            2123,
+            3487,
+            3488,
+            3489,
+            3490,
+            3495,
+            3498,
+            3499,
+            3500,
+            3501,
+            3519,
+            3522,
+            3629,
+            3630,
+            3643,
+            3644,
+            3645,
+            3650,
+            3651,
+            3675,
+            3677,
+            3799,
+            3800,
+            3801,
+            3806,
+            3807,
+            8073,
+            8074,
+            8150,
+            8151,
+            8152,
+            8217,
+            8218,
+            8228,
+            8229,
+            8291,
+            8294,
+            8295,
+            8296,
+            8306,
+            8307,
+            8316,
+            8369,
+            8384,
+            8385,
+            8394,
+            8406,
+            8483,
+            8484,
+            9411,
+            9412,
+            9413,
+            9422,
+            9423,
+            9445,
+            9447,
+            9450,
+            9451,
+            9452,
+            9457,
+            9458,
+            9461,
+            9462,
+            9463,
+            9464,
+            9465,
+            9466,
+            9483,
+            9484,
+            9485,
+            9486,
+            9487,
+            9488,
+            9489,
+            9496,
+            9497,
+            9501,
+            9502,
+            9503,
+            9504,
+            9505,
+            9522,
+            9523,
+            9524,
+            9525,
+            9526,
+            9527,
+            9549,
+            9561,
+            9562,
+            9563,
+            9586,
+            9587,
+            9588,
+            9589,
+            9590,
+            9595,
+            9596,
+            9597,
+            9626,
+            9627,
+            9628,
+            9629,
+            9635,
+            9636,
+            9667
+          ],
+          "post_nms_pair_ids": [
+            9462,
+            1966,
+            9486,
+            3498,
+            8217,
+            3488,
+            9504,
+            9627,
+            9522,
+            8151,
+            9451,
+            9596,
+            8291,
+            3519,
+            9497,
+            3500,
+            3651,
+            9496,
+            8484,
+            9413,
+            3522,
+            3499,
+            3629,
+            563,
+            8394
+          ],
+          "idisp_pair_ids": [
+            9462,
+            9486,
+            9504,
+            9627,
+            9522,
+            8151,
+            9596,
+            9496,
+            8484
+          ],
+          "range_far_pair_ids": [
+            1966,
+            3498,
+            8217,
+            3488,
+            9451,
+            8291,
+            3519,
+            9497,
+            3500,
+            3651,
+            9413,
+            3522,
+            3499,
+            3629,
+            563,
+            8394
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9462,
+            9486,
+            9504,
+            9627,
+            9522,
+            8151,
+            9596,
+            9496,
+            8484
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9486,
+            9627,
+            9522,
+            9596,
+            8484
+          ]
+        },
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "outputs": [
+          {
+            "pair_id": 9486,
+            "class_index": 1,
+            "distance_m": 9.935009002685547,
+            "score": 0.7051762938499451,
+            "best_near_car_left_iou": 0.3392315101231558,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              134.54225158691406,
+              181.10716247558594,
+              434.8271179199219,
+              300.9574890136719
+            ]
+          },
+          {
+            "pair_id": 9627,
+            "class_index": 1,
+            "distance_m": 4.653804302215576,
+            "score": 0.6361271142959595,
+            "best_near_car_left_iou": 0.0943235823565999,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              950.4393920898438,
+              156.25465393066406,
+              1242.2462158203125,
+              373.96270751953125
+            ]
+          },
+          {
+            "pair_id": 9522,
+            "class_index": 1,
+            "distance_m": 8.447586059570312,
+            "score": 0.6080705523490906,
+            "best_near_car_left_iou": 0.680494073109527,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              44.93104553222656,
+              186.72003173828125,
+              354.481689453125,
+              328.3548278808594
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 7.303060054779053,
+            "score": 0.5974904298782349,
+            "best_near_car_left_iou": 0.6599263660408801,
+            "best_near_car_gt_id": 18,
+            "boxes_left": [
+              -25.382247924804688,
+              198.8518524169922,
+              228.76199340820312,
+              374.96044921875
+            ]
+          },
+          {
+            "pair_id": 8484,
+            "class_index": 1,
+            "distance_m": 7.606448173522949,
+            "score": 0.5480386018753052,
+            "best_near_car_left_iou": 0.5678321637317896,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              915.710205078125,
+              197.79354858398438,
+              993.7039794921875,
+              284.0235595703125
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          14,
+          17,
+          18
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          14,
+          17,
+          18
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 337.161622000167,
+        "forward_samples_ms": [
+          337.161622000167,
+          372.0740230000956,
+          324.32060399969487,
+          410.42780399993717,
+          300.54931499989834
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.6728515625,
+        "output_disparity_mean_abs_diff_px": 0.1266525387763977,
+        "stage_medians_ms": {
+          "cost_volume": 68.49168799999461,
+          "decode_and_refine": 221.57191900032558,
+          "detector": 21.020309000050474,
+          "disparity_regression": 9.595741999874008,
+          "encoder": 81.81351299981543,
+          "idisp": 160.66578499976458,
+          "local_aggregation": 82.97343899994303,
+          "mask": 6.988135000028706,
+          "near10_measure": 1.5477739998459583,
+          "near10_range": 5.85441900011574,
+          "roi_sample": 16.213152000091213
+        }
+      },
+      "range_crop96": {
+        "counts": {
+          "pre_nms": 115,
+          "post_nms": 28,
+          "idisp": 9,
+          "range_far": 17,
+          "range_unknown": 2,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              288,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 115,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            1615,
+            1616,
+            1617,
+            1618,
+            1623,
+            1626,
+            1627,
+            1628,
+            1629,
+            1647,
+            1650,
+            1757,
+            1758,
+            1771,
+            1772,
+            1773,
+            1778,
+            1779,
+            1803,
+            1805,
+            1927,
+            1928,
+            1929,
+            1934,
+            1935,
+            5655,
+            5733,
+            5734,
+            5810,
+            5811,
+            5812,
+            5877,
+            5878,
+            5888,
+            5889,
+            5951,
+            5954,
+            5955,
+            5956,
+            5966,
+            5967,
+            5976,
+            6029,
+            6044,
+            6045,
+            6054,
+            6066,
+            6143,
+            6144,
+            6948,
+            6949,
+            6950,
+            6951,
+            6952,
+            6953,
+            6954,
+            6955,
+            6956,
+            6961,
+            6972,
+            6973,
+            6974,
+            6975,
+            6976,
+            6988,
+            6990,
+            6993,
+            6994,
+            6995,
+            7001,
+            7004,
+            7005,
+            7006,
+            7007,
+            7008,
+            7009,
+            7026,
+            7027,
+            7028,
+            7029,
+            7030,
+            7031,
+            7032,
+            7039,
+            7040,
+            7044,
+            7045,
+            7046,
+            7047,
+            7048,
+            7065,
+            7066,
+            7067,
+            7068,
+            7069,
+            7070,
+            7092,
+            7104,
+            7105,
+            7106,
+            7129,
+            7130,
+            7131,
+            7132,
+            7133,
+            7138,
+            7139,
+            7140,
+            7169,
+            7170,
+            7171,
+            7172,
+            7178,
+            7179,
+            7210
+          ],
+          "post_nms_pair_ids": [
+            7005,
+            1626,
+            7029,
+            5877,
+            7047,
+            1616,
+            7170,
+            7040,
+            5733,
+            6994,
+            7065,
+            6955,
+            1647,
+            5951,
+            7139,
+            6953,
+            1628,
+            1779,
+            7039,
+            6144,
+            6948,
+            6975,
+            1650,
+            1627,
+            1757,
+            6054,
+            6961,
+            6972
+          ],
+          "idisp_pair_ids": [
+            7005,
+            7029,
+            7047,
+            7170,
+            7065,
+            7139,
+            7039,
+            6144,
+            6975
+          ],
+          "range_far_pair_ids": [
+            1626,
+            5877,
+            1616,
+            7040,
+            5733,
+            6994,
+            1647,
+            5951,
+            1628,
+            1779,
+            6948,
+            1650,
+            1627,
+            1757,
+            6054,
+            6961,
+            6972
+          ],
+          "range_unknown_pair_ids": [
+            6955,
+            6953
+          ],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            7005,
+            7029,
+            7047,
+            7170,
+            7065,
+            7139,
+            7039,
+            6144,
+            6975
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            7170,
+            7065,
+            7139,
+            6144,
+            6975
+          ]
+        },
+        "output_ids": [
+          7170,
+          7065,
+          7139,
+          6144,
+          6975
+        ],
+        "outputs": [
+          {
+            "pair_id": 7170,
+            "class_index": 1,
+            "distance_m": 4.6549153327941895,
+            "score": 0.6368306279182434,
+            "best_near_car_left_iou": 0.09526913976300418,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              949.9528198242188,
+              156.78964233398438,
+              1242.4132080078125,
+              374.0837707519531
+            ]
+          },
+          {
+            "pair_id": 7065,
+            "class_index": 1,
+            "distance_m": 8.441153526306152,
+            "score": 0.6078732013702393,
+            "best_near_car_left_iou": 0.6852803560339809,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              47.94590759277344,
+              187.32994079589844,
+              357.55059814453125,
+              327.9509582519531
+            ]
+          },
+          {
+            "pair_id": 7139,
+            "class_index": 1,
+            "distance_m": 7.319845199584961,
+            "score": 0.5964041948318481,
+            "best_near_car_left_iou": 0.6644591487376108,
+            "best_near_car_gt_id": 18,
+            "boxes_left": [
+              -24.941932678222656,
+              199.48477172851562,
+              228.4093780517578,
+              375.0088195800781
+            ]
+          },
+          {
+            "pair_id": 6144,
+            "class_index": 1,
+            "distance_m": 7.598386287689209,
+            "score": 0.5470013618469238,
+            "best_near_car_left_iou": 0.5661089088230151,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              915.7813110351562,
+              197.7638702392578,
+              993.688232421875,
+              283.8280334472656
+            ]
+          },
+          {
+            "pair_id": 6975,
+            "class_index": 2,
+            "distance_m": 6.174964904785156,
+            "score": 0.5312264561653137,
+            "best_near_car_left_iou": 0.10766178522623163,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              848.4598388671875,
+              134.98770141601562,
+              1272.29931640625,
+              394.5462951660156
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          14,
+          17,
+          18
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          14,
+          17,
+          18
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 364.54327399997055,
+        "forward_samples_ms": [
+          355.91652499988413,
+          348.03273599982276,
+          364.54327399997055,
+          417.69602500016845,
+          412.55439099995783
+        ],
+        "matches_current_output_ids": false,
+        "stage_medians_ms": {
+          "cost_volume": 68.61456900014673,
+          "decode_and_refine": 220.74643099995228,
+          "detector": 30.18113899997843,
+          "disparity_regression": 3.6788890001844265,
+          "encoder": 135.73611799984064,
+          "idisp": 154.2460040000151,
+          "local_aggregation": 85.81526799980566,
+          "mask": 9.914338999806205,
+          "near10_measure": 3.798986999754561,
+          "near10_range": 6.297884000105114,
+          "roi_sample": 13.868946000002325
+        }
+      },
+      "range_crop96_amp": {
+        "counts": {
+          "pre_nms": 115,
+          "post_nms": 28,
+          "idisp": 9,
+          "range_far": 17,
+          "range_unknown": 2,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              288,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 115,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            1615,
+            1616,
+            1617,
+            1618,
+            1623,
+            1626,
+            1627,
+            1628,
+            1629,
+            1647,
+            1650,
+            1757,
+            1758,
+            1771,
+            1772,
+            1773,
+            1778,
+            1779,
+            1803,
+            1805,
+            1927,
+            1928,
+            1929,
+            1934,
+            1935,
+            5655,
+            5733,
+            5734,
+            5810,
+            5811,
+            5812,
+            5877,
+            5878,
+            5888,
+            5889,
+            5951,
+            5954,
+            5955,
+            5956,
+            5966,
+            5967,
+            5976,
+            6029,
+            6044,
+            6045,
+            6054,
+            6066,
+            6143,
+            6144,
+            6948,
+            6949,
+            6950,
+            6951,
+            6952,
+            6953,
+            6954,
+            6955,
+            6956,
+            6961,
+            6972,
+            6973,
+            6974,
+            6975,
+            6976,
+            6988,
+            6990,
+            6993,
+            6994,
+            6995,
+            7001,
+            7004,
+            7005,
+            7006,
+            7007,
+            7008,
+            7009,
+            7026,
+            7027,
+            7028,
+            7029,
+            7030,
+            7031,
+            7032,
+            7039,
+            7040,
+            7044,
+            7045,
+            7046,
+            7047,
+            7048,
+            7065,
+            7066,
+            7067,
+            7068,
+            7069,
+            7070,
+            7092,
+            7104,
+            7105,
+            7106,
+            7129,
+            7130,
+            7131,
+            7132,
+            7133,
+            7138,
+            7139,
+            7140,
+            7169,
+            7170,
+            7171,
+            7172,
+            7178,
+            7179,
+            7210
+          ],
+          "post_nms_pair_ids": [
+            7005,
+            1626,
+            7029,
+            5877,
+            7047,
+            1616,
+            7170,
+            7040,
+            5733,
+            6994,
+            6955,
+            7065,
+            1647,
+            5951,
+            7139,
+            6953,
+            1628,
+            1779,
+            7039,
+            6144,
+            6948,
+            6975,
+            1650,
+            1627,
+            1757,
+            6054,
+            6961,
+            6972
+          ],
+          "idisp_pair_ids": [
+            7005,
+            7029,
+            7047,
+            7170,
+            7065,
+            7139,
+            7039,
+            6144,
+            6975
+          ],
+          "range_far_pair_ids": [
+            1626,
+            5877,
+            1616,
+            7040,
+            5733,
+            6994,
+            1647,
+            5951,
+            1628,
+            1779,
+            6948,
+            1650,
+            1627,
+            1757,
+            6054,
+            6961,
+            6972
+          ],
+          "range_unknown_pair_ids": [
+            6955,
+            6953
+          ],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            7005,
+            7029,
+            7047,
+            7170,
+            7065,
+            7139,
+            7039,
+            6144,
+            6975
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            7170,
+            7065,
+            7139,
+            6144,
+            6975
+          ]
+        },
+        "output_ids": [
+          7170,
+          7065,
+          7139,
+          6144,
+          6975
+        ],
+        "outputs": [
+          {
+            "pair_id": 7170,
+            "class_index": 1,
+            "distance_m": 4.657673358917236,
+            "score": 0.6377079486846924,
+            "best_near_car_left_iou": 0.09508816188022971,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              950.13916015625,
+              156.66781616210938,
+              1242.048828125,
+              373.8944091796875
+            ]
+          },
+          {
+            "pair_id": 7065,
+            "class_index": 1,
+            "distance_m": 8.453834533691406,
+            "score": 0.6080123782157898,
+            "best_near_car_left_iou": 0.6837582964698324,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              47.39186096191406,
+              187.29129028320312,
+              357.469482421875,
+              328.0103759765625
+            ]
+          },
+          {
+            "pair_id": 7139,
+            "class_index": 1,
+            "distance_m": 7.313370704650879,
+            "score": 0.5966094732284546,
+            "best_near_car_left_iou": 0.6640165198575783,
+            "best_near_car_gt_id": 18,
+            "boxes_left": [
+              -24.9803466796875,
+              199.51129150390625,
+              228.58555603027344,
+              374.9951171875
+            ]
+          },
+          {
+            "pair_id": 6144,
+            "class_index": 1,
+            "distance_m": 7.600639820098877,
+            "score": 0.5489455461502075,
+            "best_near_car_left_iou": 0.5668621140084988,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              915.8434448242188,
+              197.79354858398438,
+              993.7039794921875,
+              284.0235595703125
+            ]
+          },
+          {
+            "pair_id": 6975,
+            "class_index": 2,
+            "distance_m": 6.188129425048828,
+            "score": 0.5307607650756836,
+            "best_near_car_left_iou": 0.10777493741045752,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              848.3367919921875,
+              135.03683471679688,
+              1272.329833984375,
+              394.22900390625
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          14,
+          17,
+          18
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          14,
+          17,
+          18
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 318.62316900014775,
+        "forward_samples_ms": [
+          318.62316900014775,
+          307.7386239997395,
+          414.0535439996711,
+          360.54895899997064,
+          296.95723499980886
+        ],
+        "matches_current_output_ids": false
+      },
+      "range_dedup_fp32": {
+        "counts": {
+          "pre_nms": 114,
+          "post_nms": 25,
+          "idisp": 9,
+          "range_far": 16,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 114,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            563,
+            1810,
+            1811,
+            1965,
+            1966,
+            1967,
+            2122,
+            2123,
+            3487,
+            3488,
+            3489,
+            3490,
+            3495,
+            3498,
+            3499,
+            3500,
+            3501,
+            3519,
+            3522,
+            3629,
+            3630,
+            3643,
+            3644,
+            3645,
+            3650,
+            3651,
+            3675,
+            3677,
+            3799,
+            3800,
+            3801,
+            3806,
+            3807,
+            8073,
+            8074,
+            8150,
+            8151,
+            8152,
+            8217,
+            8218,
+            8228,
+            8229,
+            8291,
+            8294,
+            8295,
+            8296,
+            8306,
+            8307,
+            8316,
+            8369,
+            8384,
+            8385,
+            8394,
+            8406,
+            8483,
+            8484,
+            9411,
+            9412,
+            9413,
+            9422,
+            9423,
+            9445,
+            9447,
+            9450,
+            9451,
+            9452,
+            9457,
+            9458,
+            9461,
+            9462,
+            9463,
+            9464,
+            9465,
+            9466,
+            9483,
+            9484,
+            9485,
+            9486,
+            9487,
+            9488,
+            9489,
+            9496,
+            9497,
+            9501,
+            9502,
+            9503,
+            9504,
+            9505,
+            9522,
+            9523,
+            9524,
+            9525,
+            9526,
+            9527,
+            9549,
+            9556,
+            9561,
+            9562,
+            9563,
+            9586,
+            9587,
+            9588,
+            9589,
+            9590,
+            9595,
+            9596,
+            9597,
+            9626,
+            9627,
+            9628,
+            9629,
+            9635,
+            9636,
+            9667
+          ],
+          "post_nms_pair_ids": [
+            9462,
+            1966,
+            9486,
+            3498,
+            8217,
+            3488,
+            9504,
+            9627,
+            8151,
+            9522,
+            9451,
+            9596,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9496,
+            8484,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "idisp_pair_ids": [
+            9462,
+            9486,
+            9504,
+            9627,
+            8151,
+            9522,
+            9596,
+            9496,
+            8484
+          ],
+          "range_far_pair_ids": [
+            1966,
+            3498,
+            8217,
+            3488,
+            9451,
+            9497,
+            8291,
+            3519,
+            3500,
+            3651,
+            9413,
+            3499,
+            3522,
+            3629,
+            563,
+            8394
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9462,
+            9486,
+            9504,
+            9627,
+            8151,
+            9522,
+            9596,
+            9496,
+            8484
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9486,
+            9627,
+            9522,
+            9596,
+            8484
+          ]
+        },
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "outputs": [
+          {
+            "pair_id": 9486,
+            "class_index": 1,
+            "distance_m": 9.919342994689941,
+            "score": 0.7052016258239746,
+            "best_near_car_left_iou": 0.3390071175077398,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              134.61285400390625,
+              181.16433715820312,
+              434.84112548828125,
+              300.8818664550781
+            ]
+          },
+          {
+            "pair_id": 9627,
+            "class_index": 1,
+            "distance_m": 4.6318206787109375,
+            "score": 0.6354318261146545,
+            "best_near_car_left_iou": 0.09440666271598586,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              950.2562255859375,
+              156.29534912109375,
+              1242.7374267578125,
+              374.20892333984375
+            ]
+          },
+          {
+            "pair_id": 9522,
+            "class_index": 1,
+            "distance_m": 8.477540016174316,
+            "score": 0.6073144674301147,
+            "best_near_car_left_iou": 0.6817432646281504,
+            "best_near_car_gt_id": 17,
+            "boxes_left": [
+              45.24729919433594,
+              186.76055908203125,
+              354.4974060058594,
+              328.2732238769531
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 7.3028411865234375,
+            "score": 0.5973749756813049,
+            "best_near_car_left_iou": 0.6601770924827159,
+            "best_near_car_gt_id": 18,
+            "boxes_left": [
+              -25.325721740722656,
+              198.88104248046875,
+              228.7909393310547,
+              375.0115051269531
+            ]
+          },
+          {
+            "pair_id": 8484,
+            "class_index": 1,
+            "distance_m": 7.598742961883545,
+            "score": 0.5461277365684509,
+            "best_near_car_left_iou": 0.5668765898769633,
+            "best_near_car_gt_id": 14,
+            "boxes_left": [
+              915.7035522460938,
+              197.74893188476562,
+              993.7171020507812,
+              283.81201171875
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          14,
+          17,
+          18
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          14,
+          17,
+          18
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 456.06286900010673,
+        "forward_samples_ms": [
+          456.06286900010673,
+          472.8277989997878,
+          483.0998180000279,
+          368.88497899963113,
+          435.06687199987937
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0
+      }
+    },
+    "000005_10": {
+      "range_fp32": {
+        "counts": {
+          "pre_nms": 111,
+          "post_nms": 20,
+          "idisp": 9,
+          "range_far": 11,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 111,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3515,
+            3649,
+            3650,
+            3651,
+            3652,
+            3655,
+            3671,
+            3672,
+            3674,
+            3800,
+            3801,
+            3802,
+            3805,
+            3806,
+            3807,
+            3808,
+            3811,
+            3830,
+            3957,
+            3958,
+            3959,
+            3961,
+            3962,
+            3963,
+            4113,
+            4114,
+            4117,
+            4118,
+            4270,
+            8072,
+            8149,
+            8150,
+            8221,
+            8227,
+            8228,
+            8236,
+            8237,
+            8238,
+            8239,
+            8298,
+            8299,
+            8305,
+            8306,
+            8311,
+            8313,
+            8314,
+            8315,
+            8316,
+            8317,
+            8320,
+            8371,
+            8383,
+            8394,
+            8449,
+            8461,
+            9421,
+            9422,
+            9423,
+            9445,
+            9446,
+            9450,
+            9451,
+            9452,
+            9461,
+            9462,
+            9463,
+            9483,
+            9484,
+            9485,
+            9486,
+            9488,
+            9489,
+            9490,
+            9491,
+            9501,
+            9502,
+            9503,
+            9504,
+            9522,
+            9523,
+            9524,
+            9525,
+            9541,
+            9542,
+            9543,
+            9544,
+            9545,
+            9556,
+            9561,
+            9562,
+            9563,
+            9564,
+            9582,
+            9583,
+            9584,
+            9585,
+            9595,
+            9596,
+            9597,
+            9624,
+            9625,
+            9626,
+            9627,
+            9628,
+            9629,
+            9663,
+            9664,
+            9665,
+            9666,
+            9667,
+            9668
+          ],
+          "post_nms_pair_ids": [
+            9451,
+            9502,
+            3650,
+            3801,
+            8238,
+            9626,
+            9489,
+            9523,
+            3515,
+            8305,
+            9542,
+            9596,
+            3655,
+            9584,
+            3811,
+            3674,
+            9421,
+            3652,
+            8311,
+            8320
+          ],
+          "idisp_pair_ids": [
+            9502,
+            9626,
+            9523,
+            8305,
+            9542,
+            9596,
+            9584,
+            9421,
+            8320
+          ],
+          "range_far_pair_ids": [
+            9451,
+            3650,
+            3801,
+            8238,
+            9489,
+            3515,
+            3655,
+            3811,
+            3674,
+            3652,
+            8311
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9502,
+            9626,
+            9523,
+            8305,
+            9542,
+            9596,
+            9584,
+            9421,
+            8320
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9626,
+            9523,
+            9542,
+            9596,
+            9584
+          ]
+        },
+        "output_ids": [
+          9626,
+          9523,
+          9542,
+          9596,
+          9584
+        ],
+        "outputs": [
+          {
+            "pair_id": 9626,
+            "class_index": 1,
+            "distance_m": 4.299363613128662,
+            "score": 0.70710289478302,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              856.873291015625,
+              217.472412109375,
+              1221.00390625,
+              381.9693603515625
+            ]
+          },
+          {
+            "pair_id": 9523,
+            "class_index": 1,
+            "distance_m": 8.834367752075195,
+            "score": 0.6812346577644348,
+            "best_near_car_left_iou": 0.6378096611007106,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              79.05718994140625,
+              154.83355712890625,
+              406.25347900390625,
+              321.0707092285156
+            ]
+          },
+          {
+            "pair_id": 9542,
+            "class_index": 1,
+            "distance_m": 6.6785807609558105,
+            "score": 0.6423077583312988,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              741.5718383789062,
+              153.1893768310547,
+              993.1312255859375,
+              314.02264404296875
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 8.81419563293457,
+            "score": 0.6037466526031494,
+            "best_near_car_left_iou": 0.37149352984023265,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              -21.64764404296875,
+              183.79791259765625,
+              193.3717498779297,
+              370.7489318847656
+            ]
+          },
+          {
+            "pair_id": 9584,
+            "class_index": 1,
+            "distance_m": 6.106605052947998,
+            "score": 0.5562119483947754,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              797.3731689453125,
+              175.5989532470703,
+              1111.218505859375,
+              372.86053466796875
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          13
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          13
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 323.12592599964773,
+        "forward_samples_ms": [
+          332.35828400029277,
+          373.27224699993167,
+          318.7058399998932,
+          323.12592599964773,
+          315.9397969998281
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0,
+        "stage_medians_ms": {
+          "cost_volume": 76.3117900000907,
+          "decode_and_refine": 218.528650999815,
+          "detector": 23.67490500000713,
+          "disparity_regression": 4.483881999931327,
+          "encoder": 129.27803100001256,
+          "idisp": 150.39018999959808,
+          "local_aggregation": 68.31295200026943,
+          "mask": 6.660780999936833,
+          "near10_measure": 2.594351999960054,
+          "near10_range": 7.97381399979713,
+          "roi_sample": 16.30427800000689
+        }
+      },
+      "baseline_fp32": {
+        "counts": {
+          "pre_nms": 111,
+          "post_nms": 20,
+          "idisp": 20,
+          "range_far": 11,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 20,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 111,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              20,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3515,
+            3649,
+            3650,
+            3651,
+            3652,
+            3655,
+            3671,
+            3672,
+            3674,
+            3800,
+            3801,
+            3802,
+            3805,
+            3806,
+            3807,
+            3808,
+            3811,
+            3830,
+            3957,
+            3958,
+            3959,
+            3961,
+            3962,
+            3963,
+            4113,
+            4114,
+            4117,
+            4118,
+            4270,
+            8072,
+            8149,
+            8150,
+            8221,
+            8227,
+            8228,
+            8236,
+            8237,
+            8238,
+            8239,
+            8298,
+            8299,
+            8305,
+            8306,
+            8311,
+            8313,
+            8314,
+            8315,
+            8316,
+            8317,
+            8320,
+            8371,
+            8383,
+            8394,
+            8449,
+            8461,
+            9421,
+            9422,
+            9423,
+            9445,
+            9446,
+            9450,
+            9451,
+            9452,
+            9461,
+            9462,
+            9463,
+            9483,
+            9484,
+            9485,
+            9486,
+            9488,
+            9489,
+            9490,
+            9491,
+            9501,
+            9502,
+            9503,
+            9504,
+            9522,
+            9523,
+            9524,
+            9525,
+            9541,
+            9542,
+            9543,
+            9544,
+            9545,
+            9556,
+            9561,
+            9562,
+            9563,
+            9564,
+            9582,
+            9583,
+            9584,
+            9585,
+            9595,
+            9596,
+            9597,
+            9624,
+            9625,
+            9626,
+            9627,
+            9628,
+            9629,
+            9663,
+            9664,
+            9665,
+            9666,
+            9667,
+            9668
+          ],
+          "post_nms_pair_ids": [
+            9451,
+            9502,
+            3650,
+            3801,
+            8238,
+            9626,
+            9489,
+            9523,
+            3515,
+            8305,
+            9542,
+            9596,
+            3655,
+            9584,
+            3811,
+            3674,
+            9421,
+            3652,
+            8311,
+            8320
+          ],
+          "idisp_pair_ids": [
+            9451,
+            9502,
+            3650,
+            3801,
+            8238,
+            9626,
+            9489,
+            9523,
+            3515,
+            8305,
+            9542,
+            9596,
+            3655,
+            9584,
+            3811,
+            3674,
+            9421,
+            3652,
+            8311,
+            8320
+          ],
+          "range_far_pair_ids": [
+            9451,
+            3650,
+            3801,
+            8238,
+            9489,
+            3515,
+            3655,
+            3811,
+            3674,
+            3652,
+            8311
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9451,
+            9502,
+            3650,
+            3801,
+            8238,
+            9626,
+            9489,
+            9523,
+            3515,
+            8305,
+            9542,
+            9596,
+            3655,
+            9584,
+            3811,
+            3674,
+            9421,
+            3652,
+            8311,
+            8320
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9626,
+            9523,
+            9542,
+            9596,
+            9584
+          ]
+        },
+        "output_ids": [
+          9626,
+          9523,
+          9542,
+          9596,
+          9584
+        ],
+        "outputs": [
+          {
+            "pair_id": 9626,
+            "class_index": 1,
+            "distance_m": 4.299604415893555,
+            "score": 0.70710289478302,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              856.873291015625,
+              217.472412109375,
+              1221.00390625,
+              381.9693603515625
+            ]
+          },
+          {
+            "pair_id": 9523,
+            "class_index": 1,
+            "distance_m": 8.834502220153809,
+            "score": 0.6812346577644348,
+            "best_near_car_left_iou": 0.6378096611007106,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              79.05718994140625,
+              154.83355712890625,
+              406.25347900390625,
+              321.0707092285156
+            ]
+          },
+          {
+            "pair_id": 9542,
+            "class_index": 1,
+            "distance_m": 6.67839241027832,
+            "score": 0.6423077583312988,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              741.5718383789062,
+              153.1893768310547,
+              993.1312255859375,
+              314.02264404296875
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 8.814168930053711,
+            "score": 0.6037466526031494,
+            "best_near_car_left_iou": 0.37149352984023265,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              -21.64764404296875,
+              183.79791259765625,
+              193.3717498779297,
+              370.7489318847656
+            ]
+          },
+          {
+            "pair_id": 9584,
+            "class_index": 1,
+            "distance_m": 6.107199668884277,
+            "score": 0.5562119483947754,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              797.3731689453125,
+              175.5989532470703,
+              1111.218505859375,
+              372.86053466796875
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          13
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          13
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 479.21214200005124,
+        "forward_samples_ms": [
+          509.7808780001287,
+          474.9052170000141,
+          531.5177920001588,
+          479.21214200005124,
+          478.47107899997354
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0028396649286150932
+      },
+      "range_amp": {
+        "counts": {
+          "pre_nms": 111,
+          "post_nms": 20,
+          "idisp": 10,
+          "range_far": 10,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 10,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 111,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              10,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3515,
+            3649,
+            3650,
+            3651,
+            3652,
+            3655,
+            3671,
+            3672,
+            3674,
+            3800,
+            3801,
+            3802,
+            3805,
+            3806,
+            3807,
+            3808,
+            3811,
+            3830,
+            3957,
+            3958,
+            3959,
+            3961,
+            3962,
+            3963,
+            4113,
+            4114,
+            4117,
+            4118,
+            4270,
+            8072,
+            8149,
+            8150,
+            8221,
+            8227,
+            8228,
+            8236,
+            8237,
+            8238,
+            8239,
+            8298,
+            8299,
+            8305,
+            8306,
+            8311,
+            8313,
+            8314,
+            8315,
+            8316,
+            8317,
+            8320,
+            8371,
+            8383,
+            8394,
+            8449,
+            8461,
+            9421,
+            9422,
+            9423,
+            9445,
+            9446,
+            9450,
+            9451,
+            9452,
+            9461,
+            9462,
+            9463,
+            9483,
+            9484,
+            9485,
+            9486,
+            9488,
+            9489,
+            9490,
+            9491,
+            9501,
+            9502,
+            9503,
+            9504,
+            9522,
+            9523,
+            9524,
+            9525,
+            9541,
+            9542,
+            9543,
+            9544,
+            9545,
+            9556,
+            9561,
+            9562,
+            9563,
+            9564,
+            9582,
+            9583,
+            9584,
+            9585,
+            9595,
+            9596,
+            9597,
+            9624,
+            9625,
+            9626,
+            9627,
+            9628,
+            9629,
+            9663,
+            9664,
+            9665,
+            9666,
+            9667,
+            9668
+          ],
+          "post_nms_pair_ids": [
+            9451,
+            9502,
+            3650,
+            3801,
+            9422,
+            9626,
+            9489,
+            9523,
+            3515,
+            8305,
+            9542,
+            8315,
+            9596,
+            3655,
+            9584,
+            3811,
+            3674,
+            3652,
+            8311,
+            8320
+          ],
+          "idisp_pair_ids": [
+            9502,
+            9422,
+            9626,
+            9523,
+            8305,
+            9542,
+            8315,
+            9596,
+            9584,
+            8320
+          ],
+          "range_far_pair_ids": [
+            9451,
+            3650,
+            3801,
+            9489,
+            3515,
+            3655,
+            3811,
+            3674,
+            3652,
+            8311
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9502,
+            9422,
+            9626,
+            9523,
+            8305,
+            9542,
+            8315,
+            9596,
+            9584,
+            8320
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9626,
+            9523,
+            9542,
+            9596,
+            9584
+          ]
+        },
+        "output_ids": [
+          9626,
+          9523,
+          9542,
+          9596,
+          9584
+        ],
+        "outputs": [
+          {
+            "pair_id": 9626,
+            "class_index": 1,
+            "distance_m": 4.293929576873779,
+            "score": 0.7077078223228455,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              856.920166015625,
+              217.5565185546875,
+              1220.78173828125,
+              381.934814453125
+            ]
+          },
+          {
+            "pair_id": 9523,
+            "class_index": 1,
+            "distance_m": 8.826298713684082,
+            "score": 0.6806663870811462,
+            "best_near_car_left_iou": 0.6376246069609826,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              79.01530456542969,
+              154.72727966308594,
+              406.33441162109375,
+              321.1185607910156
+            ]
+          },
+          {
+            "pair_id": 9542,
+            "class_index": 1,
+            "distance_m": 6.674917697906494,
+            "score": 0.6416469812393188,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              741.4049682617188,
+              153.11512756347656,
+              993.43896484375,
+              314.07598876953125
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 8.810087203979492,
+            "score": 0.6045739054679871,
+            "best_near_car_left_iou": 0.37161544675200836,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              -21.676589965820312,
+              183.67279052734375,
+              193.246337890625,
+              370.6611633300781
+            ]
+          },
+          {
+            "pair_id": 9584,
+            "class_index": 1,
+            "distance_m": 6.108725070953369,
+            "score": 0.5561585426330566,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              797.1693725585938,
+              175.54066467285156,
+              1111.30517578125,
+              373.00299072265625
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          13
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          13
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 311.79493300032846,
+        "forward_samples_ms": [
+          302.91276500020103,
+          349.33808300002056,
+          311.79493300032846,
+          299.52447899995605,
+          324.33548900007736
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.3077392578125,
+        "output_disparity_mean_abs_diff_px": 0.12898211181163788,
+        "stage_medians_ms": {
+          "cost_volume": 111.02784500008056,
+          "decode_and_refine": 326.1419090003983,
+          "detector": 22.745892999864736,
+          "disparity_regression": 5.0287970002500515,
+          "encoder": 88.81963200019527,
+          "idisp": 250.9780310001588,
+          "local_aggregation": 126.74916700007088,
+          "mask": 6.644654999945487,
+          "near10_measure": 1.8613379997987067,
+          "near10_range": 6.3446459998885985,
+          "roi_sample": 19.883915999798774
+        }
+      },
+      "range_crop96": {
+        "counts": {
+          "pre_nms": 115,
+          "post_nms": 23,
+          "idisp": 9,
+          "range_far": 13,
+          "range_unknown": 1,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 6
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              288,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 115,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            1643,
+            1777,
+            1778,
+            1779,
+            1780,
+            1783,
+            1799,
+            1800,
+            1802,
+            1928,
+            1929,
+            1930,
+            1933,
+            1934,
+            1935,
+            1936,
+            1939,
+            2085,
+            2086,
+            2087,
+            2089,
+            2090,
+            2091,
+            2241,
+            2242,
+            2245,
+            2246,
+            2398,
+            5732,
+            5809,
+            5810,
+            5881,
+            5887,
+            5888,
+            5896,
+            5897,
+            5898,
+            5899,
+            5958,
+            5959,
+            5965,
+            5966,
+            5971,
+            5973,
+            5974,
+            5975,
+            5976,
+            5977,
+            5980,
+            6031,
+            6043,
+            6054,
+            6109,
+            6121,
+            6948,
+            6949,
+            6950,
+            6964,
+            6965,
+            6966,
+            6967,
+            6988,
+            6989,
+            6993,
+            6994,
+            6995,
+            7004,
+            7005,
+            7006,
+            7026,
+            7027,
+            7028,
+            7029,
+            7031,
+            7032,
+            7033,
+            7034,
+            7044,
+            7045,
+            7046,
+            7047,
+            7048,
+            7065,
+            7066,
+            7067,
+            7068,
+            7084,
+            7085,
+            7086,
+            7087,
+            7088,
+            7099,
+            7104,
+            7105,
+            7106,
+            7107,
+            7125,
+            7126,
+            7127,
+            7128,
+            7138,
+            7139,
+            7140,
+            7167,
+            7168,
+            7169,
+            7170,
+            7171,
+            7172,
+            7206,
+            7207,
+            7208,
+            7209,
+            7210,
+            7211
+          ],
+          "post_nms_pair_ids": [
+            6994,
+            7045,
+            5898,
+            1929,
+            1778,
+            7032,
+            7169,
+            6965,
+            7066,
+            1643,
+            7085,
+            5965,
+            7139,
+            1783,
+            7127,
+            1928,
+            6949,
+            1939,
+            6967,
+            1802,
+            1936,
+            5980,
+            5971
+          ],
+          "idisp_pair_ids": [
+            7045,
+            7169,
+            7066,
+            7085,
+            5965,
+            7139,
+            7127,
+            6949,
+            5980
+          ],
+          "range_far_pair_ids": [
+            6994,
+            5898,
+            1929,
+            1778,
+            7032,
+            6965,
+            1643,
+            1783,
+            1928,
+            1939,
+            1802,
+            1936,
+            5971
+          ],
+          "range_unknown_pair_ids": [
+            6967
+          ],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            7045,
+            7169,
+            7066,
+            7085,
+            5965,
+            7139,
+            7127,
+            6949,
+            5980
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            7169,
+            7066,
+            7085,
+            7139,
+            7127,
+            6949
+          ]
+        },
+        "output_ids": [
+          7169,
+          7066,
+          7085,
+          7139,
+          7127,
+          6949
+        ],
+        "outputs": [
+          {
+            "pair_id": 7169,
+            "class_index": 1,
+            "distance_m": 4.252516269683838,
+            "score": 0.705848753452301,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              856.79833984375,
+              217.63621520996094,
+              1220.4937744140625,
+              382.0340576171875
+            ]
+          },
+          {
+            "pair_id": 7066,
+            "class_index": 1,
+            "distance_m": 8.894487380981445,
+            "score": 0.6826678514480591,
+            "best_near_car_left_iou": 0.6382325348912073,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              79.99496459960938,
+              155.70095825195312,
+              406.54461669921875,
+              321.08892822265625
+            ]
+          },
+          {
+            "pair_id": 7085,
+            "class_index": 1,
+            "distance_m": 6.680002689361572,
+            "score": 0.6440513730049133,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              740.890869140625,
+              154.16744995117188,
+              993.680908203125,
+              313.75299072265625
+            ]
+          },
+          {
+            "pair_id": 7139,
+            "class_index": 1,
+            "distance_m": 8.704607963562012,
+            "score": 0.6014728546142578,
+            "best_near_car_left_iou": 0.3708511964244471,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              -21.360580444335938,
+              184.12770080566406,
+              193.3353271484375,
+              370.8331298828125
+            ]
+          },
+          {
+            "pair_id": 7127,
+            "class_index": 1,
+            "distance_m": 6.07277250289917,
+            "score": 0.5593780875205994,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              797.4613037109375,
+              177.72621154785156,
+              1110.623779296875,
+              372.6570129394531
+            ]
+          },
+          {
+            "pair_id": 6949,
+            "class_index": 2,
+            "distance_m": 9.727812767028809,
+            "score": 0.539299726486206,
+            "best_near_car_left_iou": 0.5973998957802374,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              30.382781982421875,
+              151.12747192382812,
+              412.33203125,
+              379.0278625488281
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          13
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          13
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 308.21342999979606,
+        "forward_samples_ms": [
+          308.21342999979606,
+          295.2586300002622,
+          281.65202800028055,
+          385.013238999818,
+          374.42188900013207
+        ],
+        "matches_current_output_ids": false,
+        "stage_medians_ms": {
+          "cost_volume": 76.67435400026079,
+          "decode_and_refine": 214.0648939998755,
+          "detector": 20.05826499998875,
+          "disparity_regression": 6.0884479999003815,
+          "encoder": 100.77025000009598,
+          "idisp": 156.2273270001242,
+          "local_aggregation": 68.62450000016906,
+          "mask": 6.031743999756145,
+          "near10_measure": 1.5448479998667608,
+          "near10_range": 4.630002000340028,
+          "roi_sample": 15.547050000350282
+        }
+      },
+      "range_crop96_amp": {
+        "counts": {
+          "pre_nms": 116,
+          "post_nms": 23,
+          "idisp": 9,
+          "range_far": 13,
+          "range_unknown": 1,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 6
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              288,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 116,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            1643,
+            1777,
+            1778,
+            1779,
+            1780,
+            1783,
+            1799,
+            1800,
+            1802,
+            1928,
+            1929,
+            1930,
+            1933,
+            1934,
+            1935,
+            1936,
+            1939,
+            2085,
+            2086,
+            2087,
+            2089,
+            2090,
+            2091,
+            2241,
+            2242,
+            2245,
+            2246,
+            2398,
+            5732,
+            5809,
+            5810,
+            5881,
+            5887,
+            5888,
+            5895,
+            5896,
+            5897,
+            5898,
+            5899,
+            5958,
+            5959,
+            5965,
+            5966,
+            5971,
+            5973,
+            5974,
+            5975,
+            5976,
+            5977,
+            5980,
+            6031,
+            6043,
+            6054,
+            6109,
+            6121,
+            6948,
+            6949,
+            6950,
+            6964,
+            6965,
+            6966,
+            6967,
+            6988,
+            6989,
+            6993,
+            6994,
+            6995,
+            7004,
+            7005,
+            7006,
+            7026,
+            7027,
+            7028,
+            7029,
+            7031,
+            7032,
+            7033,
+            7034,
+            7044,
+            7045,
+            7046,
+            7047,
+            7048,
+            7065,
+            7066,
+            7067,
+            7068,
+            7084,
+            7085,
+            7086,
+            7087,
+            7088,
+            7099,
+            7104,
+            7105,
+            7106,
+            7107,
+            7125,
+            7126,
+            7127,
+            7128,
+            7138,
+            7139,
+            7140,
+            7167,
+            7168,
+            7169,
+            7170,
+            7171,
+            7172,
+            7206,
+            7207,
+            7208,
+            7209,
+            7210,
+            7211
+          ],
+          "post_nms_pair_ids": [
+            6994,
+            7045,
+            5898,
+            1929,
+            1778,
+            7032,
+            7169,
+            6965,
+            7066,
+            1643,
+            7085,
+            5965,
+            7139,
+            1783,
+            7127,
+            1928,
+            6949,
+            1939,
+            6967,
+            1802,
+            1936,
+            5980,
+            5971
+          ],
+          "idisp_pair_ids": [
+            7045,
+            7169,
+            7066,
+            7085,
+            5965,
+            7139,
+            7127,
+            6949,
+            5980
+          ],
+          "range_far_pair_ids": [
+            6994,
+            5898,
+            1929,
+            1778,
+            7032,
+            6965,
+            1643,
+            1783,
+            1928,
+            1939,
+            1802,
+            1936,
+            5971
+          ],
+          "range_unknown_pair_ids": [
+            6967
+          ],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            7045,
+            7169,
+            7066,
+            7085,
+            5965,
+            7139,
+            7127,
+            6949,
+            5980
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            7169,
+            7066,
+            7085,
+            7139,
+            7127,
+            6949
+          ]
+        },
+        "output_ids": [
+          7169,
+          7066,
+          7085,
+          7139,
+          7127,
+          6949
+        ],
+        "outputs": [
+          {
+            "pair_id": 7169,
+            "class_index": 1,
+            "distance_m": 4.25400972366333,
+            "score": 0.7067979574203491,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              856.7100219726562,
+              217.703369140625,
+              1220.3665771484375,
+              381.9728698730469
+            ]
+          },
+          {
+            "pair_id": 7066,
+            "class_index": 1,
+            "distance_m": 8.8882417678833,
+            "score": 0.6819385886192322,
+            "best_near_car_left_iou": 0.6378319146724706,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              79.955322265625,
+              155.599365234375,
+              406.72216796875,
+              321.1185607910156
+            ]
+          },
+          {
+            "pair_id": 7085,
+            "class_index": 1,
+            "distance_m": 6.6800856590271,
+            "score": 0.643889307975769,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              740.7265625,
+              154.14303588867188,
+              993.9595336914062,
+              313.78717041015625
+            ]
+          },
+          {
+            "pair_id": 7139,
+            "class_index": 1,
+            "distance_m": 8.709956169128418,
+            "score": 0.6025877594947815,
+            "best_near_car_left_iou": 0.371332521765386,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              -21.285537719726562,
+              184.032470703125,
+              193.38824462890625,
+              370.7588806152344
+            ]
+          },
+          {
+            "pair_id": 7127,
+            "class_index": 1,
+            "distance_m": 6.071802139282227,
+            "score": 0.5595307350158691,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              797.3439331054688,
+              177.71951293945312,
+              1110.72216796875,
+              372.805908203125
+            ]
+          },
+          {
+            "pair_id": 6949,
+            "class_index": 2,
+            "distance_m": 9.737792015075684,
+            "score": 0.5380626916885376,
+            "best_near_car_left_iou": 0.5970149633075933,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              30.415267944335938,
+              151.09292602539062,
+              412.4305114746094,
+              379.06842041015625
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          13
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          13
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 270.9268759999759,
+        "forward_samples_ms": [
+          268.31931000015175,
+          334.06770500005223,
+          264.3176980000135,
+          330.2348970000821,
+          270.9268759999759
+        ],
+        "matches_current_output_ids": false
+      },
+      "range_dedup_fp32": {
+        "counts": {
+          "pre_nms": 111,
+          "post_nms": 20,
+          "idisp": 9,
+          "range_far": 11,
+          "range_unknown": 0,
+          "range_invalid": 0,
+          "range_kept": 9,
+          "near10_unknown": 0,
+          "near10_final": 5
+        },
+        "trace": {
+          "backbone_inputs": [
+            [
+              2,
+              3,
+              384,
+              1248
+            ]
+          ],
+          "nms_calls": [
+            {
+              "pairs": 111,
+              "iou": 0.5,
+              "class_aware": true
+            }
+          ],
+          "idisp_inputs": [
+            [
+              9,
+              96,
+              56,
+              56
+            ]
+          ],
+          "apply_nms": true,
+          "class_aware_nms": true,
+          "pre_nms_pair_ids": [
+            3515,
+            3649,
+            3650,
+            3651,
+            3652,
+            3655,
+            3671,
+            3672,
+            3674,
+            3800,
+            3801,
+            3802,
+            3805,
+            3806,
+            3807,
+            3808,
+            3811,
+            3830,
+            3957,
+            3958,
+            3959,
+            3961,
+            3962,
+            3963,
+            4113,
+            4114,
+            4117,
+            4118,
+            4270,
+            8072,
+            8149,
+            8150,
+            8221,
+            8227,
+            8228,
+            8236,
+            8237,
+            8238,
+            8239,
+            8298,
+            8299,
+            8305,
+            8306,
+            8311,
+            8313,
+            8314,
+            8315,
+            8316,
+            8317,
+            8320,
+            8371,
+            8383,
+            8394,
+            8449,
+            8461,
+            9421,
+            9422,
+            9423,
+            9445,
+            9446,
+            9450,
+            9451,
+            9452,
+            9461,
+            9462,
+            9463,
+            9483,
+            9484,
+            9485,
+            9486,
+            9488,
+            9489,
+            9490,
+            9491,
+            9501,
+            9502,
+            9503,
+            9504,
+            9522,
+            9523,
+            9524,
+            9525,
+            9541,
+            9542,
+            9543,
+            9544,
+            9545,
+            9556,
+            9561,
+            9562,
+            9563,
+            9564,
+            9582,
+            9583,
+            9584,
+            9585,
+            9595,
+            9596,
+            9597,
+            9624,
+            9625,
+            9626,
+            9627,
+            9628,
+            9629,
+            9663,
+            9664,
+            9665,
+            9666,
+            9667,
+            9668
+          ],
+          "post_nms_pair_ids": [
+            9451,
+            9502,
+            3650,
+            3801,
+            8238,
+            9626,
+            9489,
+            9523,
+            3515,
+            8305,
+            9542,
+            9596,
+            3655,
+            9584,
+            3811,
+            3674,
+            9421,
+            3652,
+            8311,
+            8320
+          ],
+          "idisp_pair_ids": [
+            9502,
+            9626,
+            9523,
+            8305,
+            9542,
+            9596,
+            9584,
+            9421,
+            8320
+          ],
+          "range_far_pair_ids": [
+            9451,
+            3650,
+            3801,
+            8238,
+            9489,
+            3515,
+            3655,
+            3811,
+            3674,
+            3652,
+            8311
+          ],
+          "range_unknown_pair_ids": [],
+          "range_invalid_pair_ids": [],
+          "range_kept_pair_ids": [
+            9502,
+            9626,
+            9523,
+            8305,
+            9542,
+            9596,
+            9584,
+            9421,
+            8320
+          ],
+          "near10_unknown_pair_ids": [],
+          "near10_final_pair_ids": [
+            9626,
+            9523,
+            9542,
+            9596,
+            9584
+          ]
+        },
+        "output_ids": [
+          9626,
+          9523,
+          9542,
+          9596,
+          9584
+        ],
+        "outputs": [
+          {
+            "pair_id": 9626,
+            "class_index": 1,
+            "distance_m": 4.299363613128662,
+            "score": 0.70710289478302,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              856.873291015625,
+              217.472412109375,
+              1221.00390625,
+              381.9693603515625
+            ]
+          },
+          {
+            "pair_id": 9523,
+            "class_index": 1,
+            "distance_m": 8.834367752075195,
+            "score": 0.6812346577644348,
+            "best_near_car_left_iou": 0.6378096611007106,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              79.05718994140625,
+              154.83355712890625,
+              406.25347900390625,
+              321.0707092285156
+            ]
+          },
+          {
+            "pair_id": 9542,
+            "class_index": 1,
+            "distance_m": 6.6785807609558105,
+            "score": 0.6423077583312988,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              741.5718383789062,
+              153.1893768310547,
+              993.1312255859375,
+              314.02264404296875
+            ]
+          },
+          {
+            "pair_id": 9596,
+            "class_index": 1,
+            "distance_m": 8.81419563293457,
+            "score": 0.6037466526031494,
+            "best_near_car_left_iou": 0.37149352984023265,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              -21.64764404296875,
+              183.79791259765625,
+              193.3717498779297,
+              370.7489318847656
+            ]
+          },
+          {
+            "pair_id": 9584,
+            "class_index": 1,
+            "distance_m": 6.106605052947998,
+            "score": 0.5562119483947754,
+            "best_near_car_left_iou": 0.0,
+            "best_near_car_gt_id": 13,
+            "boxes_left": [
+              797.3731689453125,
+              175.5989532470703,
+              1111.218505859375,
+              372.86053466796875
+            ]
+          }
+        ],
+        "near_car_gt_ids": [
+          13
+        ],
+        "matched_near_car_gt_ids_left_iou_50": [
+          13
+        ],
+        "extra_pairs_matching_the_same_near_car_gt": 0,
+        "forward_median_ms": 350.84416399968177,
+        "forward_samples_ms": [
+          344.9394590002157,
+          446.9028379999145,
+          354.61753699973997,
+          347.2996539999258,
+          350.84416399968177
+        ],
+        "matches_current_output_ids": true,
+        "output_box_max_abs_diff_px": 0.0,
+        "output_disparity_mean_abs_diff_px": 0.0
+      }
+    }
+  }
+}
