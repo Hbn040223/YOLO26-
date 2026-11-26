@@ -1,14 +1,26 @@
 """Stage KITTI stereo-box review candidates without marking projections verified."""
 import argparse
 import json
+import math
 from pathlib import Path
 from zipfile import ZipFile
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from diagnose_pred_roi import _rectified_calibration
-from evaluate_paired_nms import write_json
+def rectified_calibration(archive, frame):
+    stem = frame.split("_", 1)[0]
+    with archive.open(f"training/calib_cam_to_cam/{stem}.txt") as handle:
+        projections = {}
+        for line in handle.read().decode("ascii").splitlines():
+            key, _, values = line.partition(":")
+            if key in ("P_rect_02", "P_rect_03"):
+                projections[key] = [float(value) for value in values.split()]
+    left, right = projections["P_rect_02"], projections["P_rect_03"]
+    bf, cx_delta = left[3] - right[3], left[2] - right[2]
+    if not (math.isfinite(bf) and math.isfinite(cx_delta) and abs(left[0] - right[0]) <= 1e-4 and bf > 0):
+        raise ValueError(f"invalid stereo calibration for {frame}")
+    return {"bf_px_m": bf, "cx_delta_px": cx_delta}
 
 
 def bounds(x, y):
@@ -59,7 +71,7 @@ def main():
                      (("left", "image_2"), ("right", "image_3"), ("instance_map", "instance"), ("disparity", "disp_occ_0"))}
             if not all(path.is_file() for path in paths.values()):
                 continue
-            calibration = _rectified_calibration(archive, frame)
+            calibration = rectified_calibration(archive, frame)
             with Image.open(paths["instance_map"]) as labels, Image.open(paths["disparity"]) as disparity:
                 instances = propose_instances(np.asarray(labels), np.asarray(disparity, dtype=np.float32) / 256., calibration)
             if instances:
@@ -79,7 +91,8 @@ def main():
                 fixed.append(row)
                 break
     fixed.extend([row for row in other if row not in fixed][:10 - len(fixed)])
-    write_json(args.output, fixed)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(fixed, allow_nan=False, indent=2) + "\n", encoding="utf-8")
     for row in fixed:
         views = []
         for side in ("left", "right"):
