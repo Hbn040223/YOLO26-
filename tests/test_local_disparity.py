@@ -12,6 +12,22 @@ from lightbackbone_stereo_yolo.local_aggregation import AttentionPyramid
 
 
 class LocalDisparityContractTest(unittest.TestCase):
+    def test_fixed_grid_mask_shortcut_and_forced_fp32(self):
+        head = RegularizedIDispHead(4, 1, 4).eval()
+        meta = make_pair_crop_windows(torch.tensor([[8., 8., 24., 24., 6., 22.]]), 64, 64, 0,
+                                      roi_sampling="fixed_56")
+        left = torch.randn(1, 4, 56, 56)
+        attention = AttentionPyramid(left, left[..., ::2, ::2], left[..., ::4, ::4])
+        valid = torch.ones(1, 1, 56, 56, dtype=torch.bool)
+        args = left, left, attention, meta, valid
+        with torch.no_grad():
+            reference = head(*args)
+            head.skip_fixed_spatial_mask = True
+            torch.testing.assert_close(head(*args).absolute, reference.absolute, rtol=0, atol=0)
+            head.force_fp32_aggregation = True
+            with torch.autocast("cpu", dtype=torch.bfloat16):
+                actual = head(*args)
+        torch.testing.assert_close(actual.absolute, reference.absolute, rtol=0, atol=0)
     def test_bmm_matches_loop(self) -> None:
         rng = torch.Generator().manual_seed(17)
         for count in (1, 2, 6, 9):

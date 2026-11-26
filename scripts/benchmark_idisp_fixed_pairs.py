@@ -74,7 +74,7 @@ def capture_stages(device, spans):
             yield
             if events is not None:
                 events[1].record()
-            spans[name.removeprefix("stereo.")] = ((perf_counter() - start) * 1000, events)
+            spans[name[len("stereo."):]] = ((perf_counter() - start) * 1000, events)
         else:
             yield
 
@@ -121,6 +121,83 @@ def parse_loads(raw):
     return loads
 
 
+def aggregation_validation(head, cache, device, warmup, repeats):
+    """Alternate each pair of arms on the same cached tensors."""
+    results = {}
+    for n, args in cache.items():
+        left, right, attention, crop, valid = args
+        build = local_disparity.build_local_cost_volume
+        volume = build(left, right, head.search, valid, head.temperature, backend="bmm")
+
+        def aggregate(force, amp, skip):
+            head.force_fp32_aggregation = force
+            head.amp_aggregation = amp
+            head.skip_fixed_spatial_mask = skip
+            return head.aggregate_volume(volume, attention, crop)
+
+        def compare(reference, candidate, *, absolute_delta=False):
+            for _ in range(warmup):
+                reference()
+                candidate()
+            rows = []
+            for i in range(repeats):
+                calls = [("reference", reference), ("candidate", candidate)]
+                if i % 2:
+                    calls.reverse()
+                rows.append({label: time_call(call, device) for label, call in calls})
+            keys = ["wall_ms"] + (["cuda_event_ms"] if device.type == "cuda" else [])
+            deltas = {k: [row["reference"][k] - row["candidate"][k] for row in rows] for k in keys}
+            return {
+                "rows": rows,
+                "summary": {label: {k: distribution([row[label][k] for row in rows]) for k in keys}
+                            for label in ("reference", "candidate")},
+                "delta": {k: distribution([abs(v) for v in vs] if absolute_delta else vs)
+                          for k, vs in deltas.items()},
+            }
+
+        def disparity(backend, force, amp, skip):
+            head.cost_backend = backend
+            head.force_fp32_aggregation = force
+            head.amp_aggregation = amp
+            head.skip_fixed_spatial_mask = skip
+            return head(*args)
+
+        def error(a, b):
+            common = a.valid & b.valid
+            difference = (a.absolute - b.absolute).abs()[common]
+            return {"valid_equal": torch.equal(a.valid, b.valid),
+                    "max_abs_disparity_px": float(difference.max()) if difference.numel() else None}
+
+        def loop():
+            return disparity("loop", True, False, False)
+
+        def bmm():
+            return disparity("bmm", True, False, False)
+
+        def masked():
+            return aggregate(True, False, False)
+
+        def skipped():
+            return aggregate(True, False, True)
+
+        result = {
+            "backend": compare(loop, bmm),
+            "backend_disparity": error(loop(), bmm()),
+            "mask_aa": compare(masked, masked, absolute_delta=True),
+            "mask_ab": compare(masked, skipped),
+            "mask_logits_equal": torch.equal(masked(), skipped()),
+            "mask_disparity": error(bmm(), disparity("bmm", True, False, True)),
+        }
+        if device.type == "cuda":
+            def amp():
+                return aggregate(False, True, False)
+            result["aggregation_precision"] = compare(amp, masked)
+            result["aggregation_dtypes"] = {"amp": str(amp().dtype), "fp32": str(masked().dtype)}
+            result["precision_disparity"] = error(bmm(), disparity("bmm", False, True, False))
+        results[n] = result
+    return results
+
+
 @torch.inference_mode()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -137,6 +214,7 @@ def main():
     parser.add_argument("--repeats", type=int, default=60)
     parser.add_argument("--precision", choices=("fp32", "amp-fp16"), default="fp32")
     parser.add_argument("--profile", action="store_true", help="measure four RoI stages in separate rounds")
+    parser.add_argument("--validate-aggregation", action="store_true", help="run paired backend, precision and mask experiments")
     add_idisp_cost_argument(parser)
     args = parser.parse_args()
     if args.warmup < 0 or args.repeats < 1:
@@ -163,8 +241,9 @@ def benchmark(args, device):
     captured = []
     route = {}
     calls = []
-    with (model.encoder.register_forward_hook(lambda _, _args, result: captured.append(result)),
-          head.idisp.register_forward_pre_hook(lambda *_: calls.append(1))):
+    with ExitStack() as hooks:
+        hooks.enter_context(model.encoder.register_forward_hook(lambda _, _args, result: captured.append(result)))
+        hooks.enter_context(head.idisp.register_forward_pre_hook(lambda *_: calls.append(1)))
         model.forward_prepared(l, r, geometry, route=route, calibration=(args.bf_px_m, args.cx_delta_px))
     pairs = route["idisp"]
     pair_ids = pairs.indices.tolist()
@@ -199,6 +278,15 @@ def benchmark(args, device):
     frame_id = args.frame_id or args.left.stem
     reference = {"frame_id": frame_id, "pair_ids_9": [pair_ids[i] for i in order[:9]] if len(order) >= 9 else [],
                  "pair_ids_6": [pair_ids[i] for i in order[:6]] if len(order) >= 6 else []}
+    if args.validate_aggregation:
+        with torch.inference_mode():
+            paired = aggregation_validation(head.idisp, cache, device, args.warmup, args.repeats)
+        write_json(args.output, {**reference, "split": args.split, "source": source_info(
+            ROOT, __file__, args.openstereo_source, args.weights), "calibration": [args.bf_px_m, args.cx_delta_px],
+            "device": str(device), "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
+            "warmup": args.warmup, "repeats": args.repeats, "initial_idisp_calls": len(calls),
+            "missing_loads": sorted(set(args.loads) - set(loads)), "paired": paired})
+        return
     rows, summary = benchmark_loads(loads, {"roi_to_idisp": sample, "cached_roi": lambda n: head.idisp(*cache[n])},
                                     device, args.warmup, args.repeats, reference)
     stage_rows = []

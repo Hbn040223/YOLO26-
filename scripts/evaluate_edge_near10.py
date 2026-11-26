@@ -171,6 +171,8 @@ def main():
         if second["class_mapping"] != mapping or second["normalization"] != bundle["normalization"]:
             parser.error("comparison requires identical classes and input normalization")
         comparison.instance_head.idisp.amp_aggregation = args.precision == "amp-fp16"
+        comparison.instance_head.idisp.force_fp32_aggregation = args.force_fp32_aggregation
+        comparison.instance_head.idisp.skip_fixed_spatial_mask = args.skip_fixed_spatial_mask
     dataset = validation_dataset(args.dataset_root, args.split_json, bundle, load_images=False)
     modes = {"R0": "baseline", "R1": "range"}
     if not args.range_only:
@@ -254,6 +256,8 @@ def main():
         "frames": rows, "arms": {arm: summarize(rows, arm, baseline=matched_ids(rows, "R0")) for arm in modes},
         "protocol": {**evidence, "precision": args.precision, "score": model.score_threshold,
                      "idisp_cost_backend": args.idisp_cost_backend,
+                     "force_fp32_aggregation": args.force_fp32_aggregation,
+                     "skip_fixed_spatial_mask": args.skip_fixed_spatial_mask,
                      "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
                      "paired_nms_iou": model.paired_nms_iou, "pre_nms_topk": model.pre_nms_topk,
                      "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},

@@ -49,6 +49,8 @@ IDISP_COST_BACKENDS = ("loop", "bmm")
 
 class RegularizedIDispHead(nn.Module):
     amp_aggregation = False
+    force_fp32_aggregation = False
+    skip_fixed_spatial_mask = False
     """Default RoI-only iDisp: cosine cost, local 2D regularization, soft-argmax."""
 
     def __init__(self, channels: int, dmax_roi: int, hidden_channels: int = 32, *,
@@ -90,8 +92,22 @@ class RegularizedIDispHead(nn.Module):
         self, cost: Tensor, attention: AttentionPyramid, metadata: CropMetadata, spatial_valid: Tensor
     ) -> Tensor:
         if metadata.fixed_size is not None:
-            return self.aggregation(cost, attention, spatial_valid)
+            return self.aggregation(cost, attention, None if self.skip_fixed_spatial_mask else spatial_valid)
         return self._aggregate_by_native_size(cost, attention, metadata, spatial_valid)
+
+    def aggregate_volume(self, volume: LocalCostVolume, attention: AttentionPyramid,
+                         metadata: CropMetadata) -> Tensor:
+        cost = volume.cost
+        if self.force_fp32_aggregation:
+            precision = torch.autocast(cost.device.type, enabled=False)
+            cost = cost.float()
+            attention = AttentionPyramid(attention.p2.float(), attention.p3.float(), attention.p4.float())
+        elif self.amp_aggregation:
+            precision = torch.autocast("cuda", dtype=torch.float16)
+        else:
+            precision = nullcontext()
+        with precision:
+            return self._aggregate_cost(cost, attention, metadata, volume.spatial_valid)
 
     def forward(self, left: Tensor, right: Tensor, attention: AttentionPyramid, metadata: CropMetadata, spatial_valid: Tensor) -> RoiDisparity:
         with record_function("stereo.idisp"):
@@ -101,10 +117,11 @@ class RegularizedIDispHead(nn.Module):
         with record_function("stereo.cost_volume"):
             volume = build_local_cost_volume(left, right, self.search, spatial_valid, self.temperature,
                                              backend=self.cost_backend)
-        amp = torch.autocast("cuda", dtype=torch.float16) if self.amp_aggregation else nullcontext()
-        with record_function("stereo.local_aggregation"), amp:
-            refined = self._aggregate_cost(volume.cost, attention, metadata, volume.spatial_valid).to(left.dtype)
-        with record_function("stereo.disparity_regression"):
+        regression_dtype = torch.float32 if self.force_fp32_aggregation else left.dtype
+        with record_function("stereo.local_aggregation"):
+            refined = self.aggregate_volume(volume, attention, metadata).to(regression_dtype)
+        regression = torch.autocast(left.device.type, enabled=False) if self.force_fp32_aggregation else nullcontext()
+        with record_function("stereo.disparity_regression"), regression:
             logits = torch.where(
                 volume.spatial_valid,
                 refined.masked_fill(~volume.valid_bins, float("-inf")),
@@ -112,7 +129,7 @@ class RegularizedIDispHead(nn.Module):
             )
             probability = torch.softmax(logits, dim=1)
             offsets = torch.arange(-self.search.dmax_roi, self.search.dmax_roi + 1,
-                                   device=left.device, dtype=left.dtype)
+                                   device=left.device, dtype=regression_dtype)
             residual = (probability * offsets[None, :, None, None]).sum(1)
             peak = probability.max(1).values
             safe = probability.clamp_min(torch.finfo(probability.dtype).tiny)

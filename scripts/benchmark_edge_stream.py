@@ -233,6 +233,8 @@ def add_input_arguments(parser):
 
 
 def add_runtime_arguments(parser):
+    parser.add_argument("--force-fp32-aggregation", action="store_true")
+    parser.add_argument("--skip-fixed-spatial-mask", action="store_true")
     add_idisp_cost_argument(parser)
     parser.add_argument("--precision", choices=("fp32", "encoder-fp16", "amp-fp16", "trt-fp32", "trt-fp16"), default="fp32")
     parser.add_argument("--cudnn-tf32", action=argparse.BooleanOptionalAction,
@@ -250,6 +252,8 @@ def configure_runtime(parser, args, model, frames, device, evidence):
     if args.cudnn_tf32 is not None:
         torch.backends.cudnn.allow_tf32 = args.cudnn_tf32
     model.instance_head.idisp.amp_aggregation = args.precision == "amp-fp16"
+    model.instance_head.idisp.force_fp32_aggregation = args.force_fp32_aggregation
+    model.instance_head.idisp.skip_fixed_spatial_mask = args.skip_fixed_spatial_mask
     if not args.engine_manifest:
         return None
     from lightbackbone_stereo_yolo.lightstereo_encoder import MobileNetV2HalfFpn
@@ -331,6 +335,8 @@ def main():
         "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "split_sha256": digest(args.split_json), "precision": args.precision, "policy": args.near10_policy,
         "idisp_cost_backend": args.idisp_cost_backend,
+        "force_fp32_aggregation": args.force_fp32_aggregation,
+        "skip_fixed_spatial_mask": args.skip_fixed_spatial_mask,
         "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
         "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
         "calibration_sha256": digest(args.calibration_zip) if args.calibration_zip else None,

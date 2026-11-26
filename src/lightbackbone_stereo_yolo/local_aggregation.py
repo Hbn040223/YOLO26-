@@ -83,8 +83,8 @@ class LocalAggregation(nn.Module):
         self.output = nn.Conv2d(channels0, dlocal, 1)
 
     @staticmethod
-    def _mask(features: Tensor, valid: Tensor) -> Tensor:
-        return features * valid.to(dtype=features.dtype)
+    def _mask(features: Tensor, valid: Tensor | None) -> Tensor:
+        return features if valid is None else features * valid.to(dtype=features.dtype)
 
     @staticmethod
     def _match(context: Tensor, reference: Tensor) -> Tensor:
@@ -92,17 +92,18 @@ class LocalAggregation(nn.Module):
             return context
         return F.interpolate(context, size=reference.shape[-2:], mode="bilinear", align_corners=False)
 
-    def forward(self, cost: Tensor, attention: AttentionPyramid, spatial_valid: Tensor) -> Tensor:
-        if cost.ndim != 4 or spatial_valid.shape != (cost.shape[0], 1, cost.shape[-2], cost.shape[-1]):
+    def forward(self, cost: Tensor, attention: AttentionPyramid, spatial_valid: Tensor | None) -> Tensor:
+        if cost.ndim != 4 or (spatial_valid is not None and
+                spatial_valid.shape != (cost.shape[0], 1, cost.shape[-2], cost.shape[-1])):
             raise ValueError("cost and spatial_valid must be [N,D,H,W] and [N,1,H,W]")
-        mask0 = spatial_valid.bool()
+        mask0 = None if spatial_valid is None else spatial_valid.bool()
         stage0 = self._mask(self.stem(cost) + self._match(self.p2_context(attention.p2), cost), mask0)
         stage0 = self._mask(self.stage0(stage0), mask0)
-        mask1 = F.max_pool2d(mask0.float(), kernel_size=2, stride=2, ceil_mode=True).bool()
+        mask1 = None if mask0 is None else F.max_pool2d(mask0.float(), 2, 2, ceil_mode=True).bool()
         stage1 = self._mask(self.down1(stage0), mask1)
         stage1 = self._mask(stage1 + self._match(self.p3_context(attention.p3), stage1), mask1)
         stage1 = self._mask(self.stage1(stage1), mask1)
-        mask2 = F.max_pool2d(mask1.float(), kernel_size=2, stride=2, ceil_mode=True).bool()
+        mask2 = None if mask1 is None else F.max_pool2d(mask1.float(), 2, 2, ceil_mode=True).bool()
         stage2 = self._mask(self.down2(stage1), mask2)
         stage2 = self._mask(stage2 + self._match(self.p4_context(attention.p4), stage2), mask2)
         stage2 = self._mask(self.stage2(stage2), mask2)
