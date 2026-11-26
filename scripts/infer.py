@@ -20,6 +20,7 @@ from lightbackbone_stereo_yolo.lightstereo_encoder import (
     LightStereoFeatureEncoder, build_lightstereo_backbone, encoder_backbone_from_config,
 )
 from lightbackbone_stereo_yolo.mask import mask_logit_cutoff
+from lightbackbone_stereo_yolo.local_disparity import IDISP_COST_BACKENDS
 from lightbackbone_stereo_yolo.roi_selection import Near10Policy, RoiPairSelection
 from lightbackbone_stereo_yolo.model import StereoLocalInstanceHead, StereoYoloLocalModel
 from lightbackbone_stereo_yolo.stereo_yolo26 import StereoYOLO26PanHead
@@ -55,7 +56,7 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
                          apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None, roi_max_distance=None,
                          bf_px_m=None, cx_delta_px=None, crop_top_px=0, containment_threshold=None,
                          near10_mode=None, near10_prefilter_m=15., near10_mask_iou=.60,
-                         near10_review_box_iou=None):
+                         near10_review_box_iou=None, idisp_cost_backend="loop"):
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
@@ -69,6 +70,7 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
     instance = StereoLocalInstanceHead(
         channels, bundle["dmax_roi"], roi_sampling=config["roi_sampling"],
         mask_head_variant=config.get("mask_head_variant", "light"),
+        idisp_cost_backend=idisp_cost_backend,
     )
     selection = None
     if roi_max_distance is not None:
@@ -92,6 +94,10 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
     return model.to(device).eval(), bundle
 
 
+def add_idisp_cost_argument(parser):
+    parser.add_argument("--idisp-cost-backend", choices=IDISP_COST_BACKENDS, default="loop")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--openstereo-source", type=Path, required=True)
@@ -99,6 +105,7 @@ def main() -> None:
     parser.add_argument("--left", type=Path, required=True)
     parser.add_argument("--right", type=Path, required=True)
     parser.add_argument("--device", default="cuda:0")
+    add_idisp_cost_argument(parser)
     parser.add_argument("--score", type=parse_score_threshold, default=.40)
     parser.add_argument("--paired-nms", action="store_true", help="opt in to class-aware stereo pair suppression")
     parser.add_argument("--paired-nms-iou", type=float, default=.5)
@@ -143,6 +150,7 @@ def main() -> None:
         containment_threshold=args.containment_threshold if args.containment_suppression else None,
         near10_mode=near10_mode, near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou,
+        idisp_cost_backend=args.idisp_cost_backend,
     )
     if not model.foreground_class_indices:
         warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",
@@ -204,6 +212,7 @@ def main() -> None:
             "detector_variant": model.detector_variant, "score": model.score_threshold, "topk": model.pre_nms_topk,
             "paired_nms_iou": model.paired_nms_iou, "containment_threshold": model.containment_threshold,
             "roi_sampling": model.instance_head.roi_sampling, **serialize_route(route), **timings,
+            "idisp_cost_backend": model.instance_head.idisp.cost_backend,
         }, indent=2) + "\n", encoding="utf-8")
     print(f"{len(result.scores)} paired detections, disparity shape {tuple(result.disparity.shape)}")
     if result.left_only is not None:

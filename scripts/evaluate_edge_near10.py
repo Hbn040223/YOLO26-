@@ -154,6 +154,7 @@ def main():
     device = torch.device(args.device)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
         score=args.score,
+        idisp_cost_backend=args.idisp_cost_backend,
         near10_mode="range" if args.range_only else "range-dedup",
         near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou)
@@ -164,6 +165,7 @@ def main():
             parser.error("cross-checkpoint R2 comparison requires the native or AMP backend")
         comparison, second = load_published_model(args.comparison_weights, args.openstereo_source, device,
             score=args.score if args.comparison_score is None else args.comparison_score,
+            idisp_cost_backend=args.idisp_cost_backend,
             apply_paired_nms=True, near10_mode="range-dedup", near10_prefilter_m=args.near10_prefilter_m,
             near10_mask_iou=args.near10_mask_iou, near10_review_box_iou=args.near10_review_box_iou)
         if second["class_mapping"] != mapping or second["normalization"] != bundle["normalization"]:
@@ -251,6 +253,8 @@ def main():
         "cross_checkpoint_r2": comparison_report,
         "frames": rows, "arms": {arm: summarize(rows, arm, baseline=matched_ids(rows, "R0")) for arm in modes},
         "protocol": {**evidence, "precision": args.precision, "score": model.score_threshold,
+                     "idisp_cost_backend": args.idisp_cost_backend,
+                     "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
                      "paired_nms_iou": model.paired_nms_iou, "pre_nms_topk": model.pre_nms_topk,
                      "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
                      "split_sha256": digest(args.split_json), "calibration_sha256": digest(args.calibration_zip),

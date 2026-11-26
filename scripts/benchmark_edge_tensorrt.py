@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from functools import partial
 import json
 from pathlib import Path
@@ -57,15 +57,19 @@ class TensorRTFrontend:
                 raise RuntimeError(f"TensorRT could not bind {name} in {path}")
         self.device = device
 
-    def __call__(self, left, right):
+    def __call__(self, left, right, *, mark=None):
         actual = tuple(left.shape), tuple(right.shape)
         if any(shape != self.input_shape for shape in actual):
             raise ValueError(f"expected TensorRT NCHW {self.input_shape} in each view, actual {actual}")
-        for name, tensor in zip(self.input_names, (left, right)):
-            self.buffers[name].copy_(tensor)
-        if not self.context.execute_async_v3(torch.cuda.current_stream(self.device).cuda_stream):
-            raise RuntimeError("TensorRT frontend execution failed")
-        return tuple(self.buffers[name].float() for name in FRONTEND_OUTPUTS)
+        scope = mark if mark is not None else lambda _: nullcontext()
+        with scope("trt_input_copy_and_cast"):
+            for name, tensor in zip(self.input_names, (left, right)):
+                self.buffers[name].copy_(tensor)
+        with scope("trt_execute"):
+            if not self.context.execute_async_v3(torch.cuda.current_stream(self.device).cuda_stream):
+                raise RuntimeError("TensorRT frontend execution failed")
+        with scope("trt_output_cast"):
+            return tuple(self.buffers[name].float() for name in FRONTEND_OUTPUTS)
 
 
 def tensor_errors(reference, candidate):

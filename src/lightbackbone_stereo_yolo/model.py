@@ -40,7 +40,8 @@ class InstanceDisparityOutput:
 class StereoLocalInstanceHead(nn.Module):
     def __init__(
         self, channels: int, dmax_roi: int, hidden_channels: int = 32, *,
-        roi_sampling: str = "native_pad", mask_head_variant: str = "light"
+        roi_sampling: str = "native_pad", mask_head_variant: str = "light",
+        idisp_cost_backend: str = "loop",
     ) -> None:
         super().__init__()
         if roi_sampling not in ROI_SAMPLING_MODES:
@@ -55,7 +56,7 @@ class StereoLocalInstanceHead(nn.Module):
             self.mask = ContextInstanceMaskHead(channels)
         else:
             raise ValueError(f"unsupported Mask head {mask_head_variant!r} for {roi_sampling!r}")
-        self.idisp = RegularizedIDispHead(channels, dmax_roi, hidden_channels)
+        self.idisp = RegularizedIDispHead(channels, dmax_roi, hidden_channels, cost_backend=idisp_cost_backend)
 
     def _disparity_forward(
         self, pyramid: object, boxes6: Tensor, image_height: int, image_width: int, margin: float, *,

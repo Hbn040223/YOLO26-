@@ -9,6 +9,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 
 class StreamTest(unittest.TestCase):
+    def test_native_precision_and_explicit_tf32_flags(self):
+        from argparse import ArgumentParser
+        from benchmark_edge_stream import add_runtime_arguments
+        parser = ArgumentParser()
+        add_runtime_arguments(parser)
+        args = parser.parse_args(["--precision", "encoder-fp16", "--no-cudnn-tf32", "--idisp-cost-backend", "bmm"])
+        self.assertEqual(args.precision, "encoder-fp16")
+        self.assertFalse(args.cudnn_tf32)
+        self.assertEqual(args.idisp_cost_backend, "bmm")
+        self.assertEqual(args.engine_manifest, [])
+        self.assertIsNone(parser.parse_args([]).cudnn_tf32)
+
     def test_score_defaults_and_explicit_candidate_threshold(self):
         from argparse import ArgumentParser
         from benchmark_edge_stream import add_input_arguments

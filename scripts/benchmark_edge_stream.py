@@ -6,7 +6,8 @@ from time import perf_counter, sleep
 from types import SimpleNamespace
 from zipfile import ZipFile
 import argparse
-from contextlib import nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
+from dataclasses import fields, replace
 
 import numpy as np
 from PIL import Image
@@ -15,7 +16,7 @@ import torch
 from diagnose_pred_roi import _rectified_calibration
 from edge_run_evidence import digest, source_info
 from evaluate_paired_nms import validation_dataset, write_json
-from infer import ROOT, load_published_model, parse_score_threshold
+from infer import ROOT, add_idisp_cost_argument, load_published_model, parse_score_threshold
 from lightbackbone_stereo_yolo.stereo_input import prepare_rectified_images
 
 
@@ -105,39 +106,84 @@ def load_frontends(manifests, precision, device, evidence):
 
 
 @torch.inference_mode()
-def infer_frame(model, frame, normalization, device, precision, frontends=None, *, trace=False):
+def infer_frame(model, frame, normalization, device, precision, frontends=None, *,
+                trace=False, stage_timing=False):
     from torch.profiler import record_function
     from lightbackbone_stereo_yolo.edge_deployment import FEATURE_OUTPUTS, unpack_frontend_outputs
 
     left, right, calibration = frame
     timings = {}
+    spans = []
+
+    @contextmanager
+    def mark(name):
+        if not stage_timing:
+            yield
+            return
+        started = perf_counter()
+        events = None
+        if device.type == "cuda":
+            events = [torch.cuda.Event(enable_timing=True) for _ in range(2)]
+            events[0].record(torch.cuda.current_stream(device))
+        yield
+        if events:
+            events[1].record(torch.cuda.current_stream(device))
+        spans.append((name, (perf_counter() - started) * 1000, events))
+
     l, r, geometry = prepare_rectified_images(left, right, normalization, timings=timings)
     route = {}
     start = perf_counter()
-    with record_function("stereo.h2d"):
+    with record_function("stereo.h2d"), mark("h2d"):
         l, r = l.to(device), r.to(device)
     timings["h2d_ms"] = (perf_counter() - start) * 1000
     if frontends is not None:
-        with record_function("stereo.frontend"):
+        with record_function("stereo.frontend"), mark("trt_frontend"):
             frontend = frontends[geometry.original_hw]
-            pyramid, dense = unpack_frontend_outputs(frontend(l, r), geometry.cropped_hw, geometry.padded_hw)
+            outputs = frontend(l, r, mark=mark) if stage_timing else frontend(l, r)
+            pyramid, dense = unpack_frontend_outputs(outputs, geometry.cropped_hw, geometry.padded_hw)
+    elif precision == "encoder-fp16":
+        with record_function("stereo.frontend"):
+            with record_function("stereo.encoder"), mark("encoder"), torch.autocast("cuda", dtype=torch.float16):
+                pyramid = model.encoder(l, r)
+            with mark("fp32_boundary"):
+                pyramid = replace(pyramid, **{field.name: getattr(pyramid, field.name).float()
+                                              for field in fields(pyramid) if field.name != "metadata"})
+            with mark("detector"):
+                dense = model.detector(pyramid)
     else:
         amp = torch.autocast("cuda", dtype=torch.float16) if precision == "amp-fp16" else nullcontext()
         with record_function("stereo.frontend"), amp:
-            with record_function("stereo.encoder"):
+            with record_function("stereo.encoder"), mark("encoder"):
                 pyramid = model.encoder(l, r)
-            dense = model.detector(pyramid)
+            with mark("detector"):
+                dense = model.detector(pyramid)
     # Keep geometric decoding and RoI coordinates in FP32 for all frontends.
-    if precision != "fp32" or frontends is not None:
-        pyramid = SimpleNamespace(**{name: getattr(pyramid, name).float()
-            for name in FEATURE_OUTPUTS},
-            metadata=getattr(pyramid, "metadata", None))
-        dense = SimpleNamespace(**{name: getattr(dense, name).float() for name in ("objectness", "class_logits", "box6")})
+    if precision == "amp-fp16" or frontends is not None:
+        with mark("fp32_boundary"):
+            pyramid = SimpleNamespace(**{name: getattr(pyramid, name).float() for name in FEATURE_OUTPUTS},
+                                      metadata=getattr(pyramid, "metadata", None))
+            dense = SimpleNamespace(**{name: getattr(dense, name).float()
+                                       for name in ("objectness", "class_logits", "box6")})
     start = perf_counter()
-    with record_function("stereo.decode_and_refine"):
+    with ExitStack() as stack, record_function("stereo.decode_and_refine"), mark("decode_and_refine"):
+        if stage_timing:
+            head = model.instance_head.idisp
+            idisp_scopes = []
+
+            def begin_idisp(*_):
+                scope = mark("idisp")
+                scope.__enter__()
+                idisp_scopes.append(scope)
+
+            def end_idisp(*_):
+                if idisp_scopes:
+                    idisp_scopes.pop().__exit__(None, None, None)
+
+            stack.callback(head.register_forward_pre_hook(begin_idisp).remove)
+            stack.callback(head.register_forward_hook(end_idisp, always_call=True).remove)
         output = model.decode_and_refine(l, pyramid, dense, input_geometry=geometry, route=route,
-                                         calibration=calibration)
-    with record_function("stereo.output"):
+                                        calibration=calibration)
+    with record_function("stereo.output"), mark("output"):
         for name in ("pair_ids", "boxes_left", "boxes_right", "scores", "classes", "disparity",
                      "validity", "foreground_validity", "mask_logits", "mask_validity", "near10_distance_m"):
             value = getattr(output, name)
@@ -150,7 +196,19 @@ def infer_frame(model, frame, normalization, device, precision, frontends=None, 
             for name in ("c_l", "c_r", "c", "y0", "h_crop", "w_roi", "h_roi"):
                 getattr(output.crop, name).cpu()
         if device.type == "cuda":
+            barrier_start = perf_counter()
             torch.cuda.synchronize(device)
+            if stage_timing:
+                timings["output_synchronize_wall_ms"] = (perf_counter() - barrier_start) * 1000
+    if stage_timing:
+        if device.type == "cuda":
+            spans[-1][2][1].synchronize()
+        timings["stages"] = {}
+        for name, wall, events in spans:
+            row = timings["stages"].setdefault(name, {"host_wall_ms": 0., "cuda_stream_ms": 0. if events else None})
+            row["host_wall_ms"] += wall
+            if events:
+                row["cuda_stream_ms"] += events[0].elapsed_time(events[1])
     timings["postprocess_and_output_ms"] = (perf_counter() - start) * 1000
     timings["idisp_pairs"] = len(route["idisp"].indices)
     timings["output_pairs"] = len(output.pair_ids)
@@ -175,7 +233,10 @@ def add_input_arguments(parser):
 
 
 def add_runtime_arguments(parser):
-    parser.add_argument("--precision", choices=("fp32", "amp-fp16", "trt-fp32", "trt-fp16"), default="fp32")
+    add_idisp_cost_argument(parser)
+    parser.add_argument("--precision", choices=("fp32", "encoder-fp16", "amp-fp16", "trt-fp32", "trt-fp16"), default="fp32")
+    parser.add_argument("--cudnn-tf32", action=argparse.BooleanOptionalAction,
+                        help="set PyTorch cuDNN TF32 explicitly (default: PyTorch setting)")
     parser.add_argument("--engine-manifest", type=Path, action="append", default=[])
 
 
@@ -186,6 +247,8 @@ def configure_runtime(parser, args, model, frames, device, evidence):
         parser.error("TensorRT modes require --engine-manifest for each input size")
     if not frames:
         parser.error("the evaluation split contains no frames")
+    if args.cudnn_tf32 is not None:
+        torch.backends.cudnn.allow_tf32 = args.cudnn_tf32
     model.instance_head.idisp.amp_aggregation = args.precision == "amp-fp16"
     if not args.engine_manifest:
         return None
@@ -217,6 +280,7 @@ def main():
     evidence = source_info(ROOT, __file__, args.openstereo_source, args.weights)
     model, bundle = load_published_model(args.weights, args.openstereo_source, device, apply_paired_nms=True,
         score=args.score,
+        idisp_cost_backend=args.idisp_cost_backend,
         near10_mode=args.near10_policy if args.calibration_zip else None,
         near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou)
@@ -238,26 +302,10 @@ def main():
             activities.append(torch.profiler.ProfilerActivity.CUDA)
         profile_rows = []
         for frame_id, frame in frames:
-            events = []
-            if device.type == "cuda":
-                def begin_idisp(*_):
-                    start, end = (torch.cuda.Event(enable_timing=True) for _ in range(2))
-                    start.record(torch.cuda.current_stream(device))
-                    events.append((start, end))
-
-                def end_idisp(*_):
-                    events[-1][1].record(torch.cuda.current_stream(device))
-
-                head = model.instance_head.idisp
-                handles = [head.register_forward_pre_hook(begin_idisp), head.register_forward_hook(end_idisp)]
-            else:
-                handles = []
-            try:
-                with torch.profiler.profile(activities=activities) as profiler:
-                    infer(frame)
-            finally:
-                for handle in handles:
-                    handle.remove()
+            stage_timings = infer_frame(model, frame, bundle["normalization"], device, args.precision,
+                                        frontends, stage_timing=True)
+            with torch.profiler.profile(activities=activities) as profiler:
+                infer(frame)
             spans = {}
             for event in profiler.key_averages():
                 if event.key.startswith("stereo."):
@@ -266,7 +314,8 @@ def main():
                     spans[event.key] = {"cpu_ms": event.cpu_time_total / 1000,
                                         "cuda_ms": device_time / 1000, "calls": event.count}
             profile_rows.append({"frame_id": frame_id, "spans": spans,
-                                 "idisp_cuda_elapsed_ms": sum(start.elapsed_time(end) for start, end in events)
+                                 "stage_timings": stage_timings,
+                                 "idisp_cuda_elapsed_ms": stage_timings["stages"].get("idisp", {}).get("cuda_stream_ms", 0.)
                                  if device.type == "cuda" else None})
         report["profile_rows"] = profile_rows
         report["profile_p95_ms"] = {
@@ -281,6 +330,8 @@ def main():
         **evidence, "device": str(device), "torch": torch.__version__, "cuda": torch.version.cuda,
         "gpu": torch.cuda.get_device_name(device) if device.type == "cuda" else None,
         "split_sha256": digest(args.split_json), "precision": args.precision, "policy": args.near10_policy,
+        "idisp_cost_backend": args.idisp_cost_backend,
+        "cudnn_allow_tf32": torch.backends.cudnn.allow_tf32,
         "engine_manifests": {str(path): digest(path) for path in args.engine_manifest},
         "calibration_sha256": digest(args.calibration_zip) if args.calibration_zip else None,
         "prefilter_m": args.near10_prefilter_m, "mask_iou": args.near10_mask_iou,

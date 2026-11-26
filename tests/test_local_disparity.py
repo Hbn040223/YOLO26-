@@ -12,6 +12,23 @@ from lightbackbone_stereo_yolo.local_aggregation import AttentionPyramid
 
 
 class LocalDisparityContractTest(unittest.TestCase):
+    def test_bmm_matches_loop(self) -> None:
+        rng = torch.Generator().manual_seed(17)
+        for count in (1, 2, 6, 9):
+            for width in (5, 56):
+                with self.subTest(count=count, width=width):
+                    shape = (count, 96, 7, width)
+                    left = torch.randn(shape, generator=rng)
+                    right = torch.randn(shape, generator=rng)
+                    valid = torch.rand((count, 1, 7, width), generator=rng) > .2
+                    valid[:, :, 0] = False
+                    args = (left, right, ResidualSearch(16), valid, LearnableTemperature())
+                    reference = build_local_cost_volume(*args)
+                    result = build_local_cost_volume(*args, backend="bmm")
+                    self.assertTrue(torch.equal(reference.valid_bins, result.valid_bins))
+                    self.assertTrue(torch.equal(reference.spatial_valid, result.spatial_valid))
+                    torch.testing.assert_close(result.cost, reference.cost, atol=1e-5, rtol=1e-5)
+
     def test_regularized_head_returns_image_domain_disparity_and_confidence(self) -> None:
         self.assertIsNotNone(RegularizedIDispHead)
         metadata = CropMetadata(c_l=torch.tensor([4.]), c_r=torch.tensor([0.]), c=torch.tensor([16.]), y0=torch.tensor([0.]), h_crop=torch.tensor([8.]), w_roi=torch.tensor([4]), h_roi=torch.tensor([2]))

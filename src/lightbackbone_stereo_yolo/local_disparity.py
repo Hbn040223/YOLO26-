@@ -44,12 +44,19 @@ class RoiDisparity:
     entropy: Tensor
 
 
+IDISP_COST_BACKENDS = ("loop", "bmm")
+
+
 class RegularizedIDispHead(nn.Module):
     amp_aggregation = False
     """Default RoI-only iDisp: cosine cost, local 2D regularization, soft-argmax."""
 
-    def __init__(self, channels: int, dmax_roi: int, hidden_channels: int = 32) -> None:
+    def __init__(self, channels: int, dmax_roi: int, hidden_channels: int = 32, *,
+                 cost_backend: str = "loop") -> None:
         super().__init__()
+        if cost_backend not in IDISP_COST_BACKENDS:
+            raise ValueError(f"unknown iDisp cost backend: {cost_backend}")
+        self.cost_backend = cost_backend
         self.search = ResidualSearch(dmax_roi)
         self.temperature = LearnableTemperature()
         self.aggregation = LocalAggregation(2 * dmax_roi + 1, channels, channels, channels, hidden_channels)
@@ -92,7 +99,8 @@ class RegularizedIDispHead(nn.Module):
 
     def _forward(self, left, right, attention, metadata, spatial_valid):
         with record_function("stereo.cost_volume"):
-            volume = build_local_cost_volume(left, right, self.search, spatial_valid, self.temperature)
+            volume = build_local_cost_volume(left, right, self.search, spatial_valid, self.temperature,
+                                             backend=self.cost_backend)
         amp = torch.autocast("cuda", dtype=torch.float16) if self.amp_aggregation else nullcontext()
         with record_function("stereo.local_aggregation"), amp:
             refined = self._aggregate_cost(volume.cost, attention, metadata, volume.spatial_valid).to(left.dtype)
@@ -119,15 +127,21 @@ def build_local_cost_volume(
     search: ResidualSearch,
     spatial_valid: Tensor,
     temperature: LearnableTemperature,
+    *,
+    backend: str = "loop",
 ) -> LocalCostVolume:
     """Correlation volume `[N, 2D+1, Hroi, Wroi]`; never accepts full-image maps."""
     if left_roi.shape != right_roi.shape or left_roi.ndim != 4:
         raise ValueError("left/right RoI features must have equal NCHW shape")
     if spatial_valid.shape != (left_roi.shape[0], 1, left_roi.shape[-2], left_roi.shape[-1]):
         raise ValueError("spatial_valid must be [N,1,H,W] for the RoI features")
+    if backend not in IDISP_COST_BACKENDS:
+        raise ValueError(f"unknown iDisp cost backend: {backend}")
     dmax = search.dmax_roi
     left_roi = F.normalize(left_roi, p=2, dim=1)
     right_roi = F.normalize(right_roi, p=2, dim=1)
+    if backend == "bmm":
+        return _rowwise_cost_volume(left_roi, right_roi, dmax, spatial_valid.bool(), temperature())
     padded = F.pad(right_roi, (dmax, dmax))
     padded_valid = F.pad(spatial_valid.bool(), (dmax, dmax))
     width = left_roi.shape[-1]
@@ -140,6 +154,29 @@ def build_local_cost_volume(
         costs.append((correlation / tau).masked_fill(~combined_valid, 0.0))
         valid.append(combined_valid)
     return LocalCostVolume(torch.stack(costs, 1), torch.stack(valid, 1), spatial_valid.bool())
+
+
+def _rowwise_cost_volume(left: Tensor, right: Tensor, dmax: int, spatial_valid: Tensor,
+                         temperature: Tensor) -> LocalCostVolume:
+    count, channels, height, width = left.shape
+    left_rows = left.permute(0, 2, 3, 1).reshape(count * height, width, channels)
+    right_rows = right.permute(0, 2, 1, 3).reshape(count * height, channels, width)
+    # Preserve the feature dtype when called inside a lower-precision frontend context.
+    with torch.autocast(device_type=left.device.type, enabled=False):
+        correlation = torch.bmm(left_rows, right_rows).reshape(count, height, width, width)
+
+    x = torch.arange(width, device=left.device)
+    offsets = torch.arange(-dmax, dmax + 1, device=left.device)
+    right_x = x[:, None] - offsets
+    in_bounds = (right_x >= 0) & (right_x < width)
+    # Clamp gather indices while keeping out-of-bounds bins invalid.
+    index = right_x.clamp(0, max(0, width - 1))
+    cost = correlation.gather(-1, index.expand(count, height, -1, -1))
+    valid_pixels = spatial_valid[:, 0]
+    valid = valid_pixels[..., None] & valid_pixels[..., index] & in_bounds
+    cost = (cost / temperature).masked_fill(~valid, 0.0)
+    return LocalCostVolume(cost.permute(0, 3, 1, 2).contiguous(),
+                           valid.permute(0, 3, 1, 2).contiguous(), spatial_valid)
 
 
 def regress_residual_disparity(cost_volume: Tensor | LocalCostVolume, search: ResidualSearch) -> Tensor:
