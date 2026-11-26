@@ -1,0 +1,1195 @@
+{
+  "commit": "308064e",
+  "frame_id": "000004_10",
+  "pair_ids_9": [
+    9462,
+    9486,
+    9504,
+    9627,
+    8151,
+    9522,
+    9596,
+    9496,
+    8484
+  ],
+  "timing_samples_per_load": 12,
+  "same_dtype_test": {
+    "fp32_same_tensor": true,
+    "fp16_to_fp32_changes_storage": true,
+    "second_float_same_tensor": true,
+    "to_copy_calls": 1
+  },
+  "variants": {
+    "fp32": {
+      "6": {
+        "common_pixels": 18816,
+        "valid_equal": true,
+        "max_abs_disparity_delta_px": 0.0,
+        "wall_timings_ms": [
+          440.7977880000544,
+          393.81450200016843,
+          497.80775900035223,
+          483.42368500016164,
+          466.29513100015174,
+          450.7872150006733,
+          486.77602799944,
+          600.3546359988832,
+          467.4549259998457,
+          506.46909799979767,
+          527.2398369997973,
+          469.646338999155
+        ],
+        "wall_p50_p95_ms": [
+          476.5350119996583,
+          560.1414965493859
+        ],
+        "tensor_boundaries": {},
+        "profiler_selected": {
+          "stereo.roi_sample/aten::_local_scalar_dense": {
+            "calls": 3,
+            "self_cpu_us": 302639.307,
+            "device_us": 0.0
+          },
+          "stereo.cost_volume/aten::copy_": {
+            "calls": 35,
+            "self_cpu_us": 2084.697999999975,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::_to_copy": {
+            "calls": 15,
+            "self_cpu_us": 377.5559999999241,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::copy_": {
+            "calls": 15,
+            "self_cpu_us": 662.8899999999558,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::copy_": {
+            "calls": 2,
+            "self_cpu_us": 110.85500000003958,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 18.68900000001304,
+            "device_us": 0.0
+          }
+        }
+      },
+      "9": {
+        "common_pixels": 28224,
+        "valid_equal": true,
+        "max_abs_disparity_delta_px": 0.0,
+        "wall_timings_ms": [
+          580.0226600003953,
+          508.52547400063486,
+          561.9867200002773,
+          577.821140001106,
+          523.0910099999164,
+          486.09074799969676,
+          548.1383789992833,
+          600.4846730011195,
+          515.6059189994266,
+          611.7543729997124,
+          494.8616639994725,
+          534.5977899996797
+        ],
+        "wall_p50_p95_ms": [
+          541.3680844994815,
+          605.5560380004863
+        ],
+        "tensor_boundaries": {},
+        "profiler_selected": {
+          "stereo.roi_sample/aten::_local_scalar_dense": {
+            "calls": 3,
+            "self_cpu_us": 279307.718,
+            "device_us": 0.0
+          },
+          "stereo.cost_volume/aten::copy_": {
+            "calls": 35,
+            "self_cpu_us": 1836.7450000001118,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::_to_copy": {
+            "calls": 15,
+            "self_cpu_us": 274.92499999987194,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::copy_": {
+            "calls": 15,
+            "self_cpu_us": 553.9200000001583,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::copy_": {
+            "calls": 2,
+            "self_cpu_us": 102.46899999998277,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.057999999960884,
+            "device_us": 0.0
+          }
+        }
+      },
+      "automatic": {
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "reference_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "distances_m": [
+          9.931387901306152,
+          4.635391712188721,
+          8.4824800491333,
+          7.302928924560547,
+          7.597784996032715
+        ]
+      }
+    },
+    "encoder-fp16-experimental": {
+      "6": {
+        "common_pixels": 18816,
+        "valid_equal": true,
+        "max_abs_disparity_delta_px": 0.5165443420410156,
+        "wall_timings_ms": [
+          260.04309200106945,
+          306.13086400080647,
+          320.9339650002221,
+          284.71364399956656,
+          266.179602000193,
+          310.1437599998462,
+          240.46155500036548,
+          330.7761579999351,
+          267.34852399931697,
+          285.1458149998507,
+          282.9614930014941,
+          295.0144790011109
+        ],
+        "wall_p50_p95_ms": [
+          284.9297294997086,
+          325.36295185009294
+        ],
+        "tensor_boundaries": {
+          "p2_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p2_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p3_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              47,
+              156
+            ],
+            "storage_changed": true
+          },
+          "p4_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              24,
+              78
+            ],
+            "storage_changed": true
+          },
+          "c5_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              12,
+              39
+            ],
+            "storage_changed": true
+          },
+          "p3_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              47,
+              156
+            ],
+            "storage_changed": true
+          },
+          "p4_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              24,
+              78
+            ],
+            "storage_changed": true
+          },
+          "c5_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              12,
+              39
+            ],
+            "storage_changed": true
+          }
+        },
+        "profiler_selected": {
+          "audit.encoder/aten::_to_copy": {
+            "calls": 64,
+            "self_cpu_us": 1126.9100000000285,
+            "device_us": 0.0
+          },
+          "audit.encoder/aten::copy_": {
+            "calls": 64,
+            "self_cpu_us": 2398.4450000000024,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 18.465000000003783,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 53.73099999999977,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.51199999999517,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 39.3949999999968,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.32100000000355,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 37.538000000000466,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 33.73099999999977,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 39.970000000001164,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.897000000011758,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 37.34599999999773,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 15.872999999992317,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 38.05000000000291,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.64100000000326,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 37.02599999999802,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 15.840999999993073,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 35.81000000000495,
+            "device_us": 0.0
+          },
+          "stereo.roi_sample/aten::_local_scalar_dense": {
+            "calls": 3,
+            "self_cpu_us": 61154.852999999996,
+            "device_us": 0.0
+          },
+          "stereo.cost_volume/aten::copy_": {
+            "calls": 35,
+            "self_cpu_us": 1339.7240000000456,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::_to_copy": {
+            "calls": 15,
+            "self_cpu_us": 272.7820000000065,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::copy_": {
+            "calls": 15,
+            "self_cpu_us": 562.5600000000268,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::copy_": {
+            "calls": 2,
+            "self_cpu_us": 108.35800000000745,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.57600000000093,
+            "device_us": 0.0
+          }
+        }
+      },
+      "9": {
+        "common_pixels": 28224,
+        "valid_equal": true,
+        "max_abs_disparity_delta_px": 0.5165443420410156,
+        "wall_timings_ms": [
+          335.6508290016791,
+          342.40488300019933,
+          286.510048999844,
+          451.15080700088583,
+          288.3705360000022,
+          337.4747580000985,
+          362.1633889997611,
+          377.36868600040907,
+          337.24030400117044,
+          281.0864519997267,
+          415.9204809984658,
+          367.4671680000756
+        ],
+        "wall_p50_p95_ms": [
+          339.9398205001489,
+          431.7741276995548
+        ],
+        "tensor_boundaries": {
+          "p2_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p2_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p3_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              47,
+              156
+            ],
+            "storage_changed": true
+          },
+          "p4_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              24,
+              78
+            ],
+            "storage_changed": true
+          },
+          "c5_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              12,
+              39
+            ],
+            "storage_changed": true
+          },
+          "p3_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              47,
+              156
+            ],
+            "storage_changed": true
+          },
+          "p4_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              24,
+              78
+            ],
+            "storage_changed": true
+          },
+          "c5_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              12,
+              39
+            ],
+            "storage_changed": true
+          }
+        },
+        "profiler_selected": {
+          "audit.encoder/aten::_to_copy": {
+            "calls": 64,
+            "self_cpu_us": 1083.1459999999927,
+            "device_us": 0.0
+          },
+          "audit.encoder/aten::copy_": {
+            "calls": 64,
+            "self_cpu_us": 2392.229999999997,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 18.271999999997206,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 51.586999999999534,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 15.7129999999961,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 39.71399999999994,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.096999999994296,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 59.65200000000186,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 35.554000000003725,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 40.258999999998196,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.799999999995634,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 36.03500000000349,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.769000000000233,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 38.11499999999796,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 15.84100000000035,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 35.874000000003434,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.858000000000175,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 35.45799999999872,
+            "device_us": 0.0
+          },
+          "stereo.roi_sample/aten::_local_scalar_dense": {
+            "calls": 3,
+            "self_cpu_us": 73137.937,
+            "device_us": 0.0
+          },
+          "stereo.cost_volume/aten::copy_": {
+            "calls": 35,
+            "self_cpu_us": 1446.9370000000927,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::_to_copy": {
+            "calls": 15,
+            "self_cpu_us": 301.9079999998212,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::copy_": {
+            "calls": 15,
+            "self_cpu_us": 566.9439999999886,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::copy_": {
+            "calls": 2,
+            "self_cpu_us": 108.32699999999022,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.66500000000815,
+            "device_us": 0.0
+          }
+        }
+      },
+      "automatic": {
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "reference_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "distances_m": [
+          9.924982070922852,
+          4.653655529022217,
+          8.447564125061035,
+          7.3058085441589355,
+          7.604108810424805
+        ]
+      }
+    },
+    "amp-fp16": {
+      "6": {
+        "common_pixels": 18816,
+        "valid_equal": true,
+        "max_abs_disparity_delta_px": 0.5191917419433594,
+        "wall_timings_ms": [
+          281.89361399927293,
+          235.56431999895722,
+          266.5467010010616,
+          243.12014899987844,
+          267.5172790004581,
+          207.6814080010081,
+          212.60258899928886,
+          311.61465700097324,
+          217.67641699989326,
+          222.21549500136462,
+          243.50249199960672,
+          249.9402090015792
+        ],
+        "wall_p50_p95_ms": [
+          243.31132049974258,
+          295.26808335003807
+        ],
+        "tensor_boundaries": {
+          "p2_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p2_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p3_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              47,
+              156
+            ],
+            "storage_changed": true
+          },
+          "p4_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              24,
+              78
+            ],
+            "storage_changed": true
+          },
+          "c5_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              12,
+              39
+            ],
+            "storage_changed": true
+          },
+          "objectness": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              9672
+            ],
+            "storage_changed": true
+          },
+          "class_logits": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              9672,
+              4
+            ],
+            "storage_changed": true
+          },
+          "box6": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              9672,
+              6
+            ],
+            "storage_changed": true
+          }
+        },
+        "profiler_selected": {
+          "audit.encoder/aten::_to_copy": {
+            "calls": 64,
+            "self_cpu_us": 1092.6380000000129,
+            "device_us": 0.0
+          },
+          "audit.encoder/aten::copy_": {
+            "calls": 64,
+            "self_cpu_us": 2400.272000000002,
+            "device_us": 0.0
+          },
+          "audit.detector/aten::_to_copy": {
+            "calls": 88,
+            "self_cpu_us": 1358.164000000099,
+            "device_us": 0.0
+          },
+          "audit.detector/aten::copy_": {
+            "calls": 88,
+            "self_cpu_us": 3035.053999999931,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 19.23200000001816,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 52.29099999999744,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.37799999998242,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 39.138000000006286,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 18.786000000007334,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 38.27399999999034,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 15.45799999999872,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 39.586000000010245,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 14.241000000023632,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 34.01799999999639,
+            "device_us": 0.0
+          },
+          "fp32_boundary.objectness/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.640999999988708,
+            "device_us": 0.0
+          },
+          "fp32_boundary.objectness/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 33.92200000000594,
+            "device_us": 0.0
+          },
+          "fp32_boundary.class_logits/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 16.353000000002794,
+            "device_us": 0.0
+          },
+          "fp32_boundary.class_logits/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 34.337999999988824,
+            "device_us": 0.0
+          },
+          "fp32_boundary.box6/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 20.545999999987544,
+            "device_us": 0.0
+          },
+          "fp32_boundary.box6/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 33.570000000006985,
+            "device_us": 0.0
+          },
+          "stereo.roi_sample/aten::_local_scalar_dense": {
+            "calls": 3,
+            "self_cpu_us": 70881.02,
+            "device_us": 0.0
+          },
+          "stereo.cost_volume/aten::copy_": {
+            "calls": 35,
+            "self_cpu_us": 1338.9560000000638,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::_to_copy": {
+            "calls": 142,
+            "self_cpu_us": 2311.815999999817,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::copy_": {
+            "calls": 142,
+            "self_cpu_us": 4891.039000000281,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::copy_": {
+            "calls": 2,
+            "self_cpu_us": 110.98300000000745,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 18.112999999983003,
+            "device_us": 0.0
+          }
+        }
+      },
+      "9": {
+        "common_pixels": 28224,
+        "valid_equal": true,
+        "max_abs_disparity_delta_px": 0.5191917419433594,
+        "wall_timings_ms": [
+          344.1449530000682,
+          266.8114030002471,
+          339.3422389999614,
+          344.9744320005266,
+          316.1003699988214,
+          348.3630400005495,
+          334.1147199989791,
+          302.02597599964065,
+          283.7361760011845,
+          369.53369399998337,
+          353.17191099966294,
+          274.3235289999575
+        ],
+        "wall_p50_p95_ms": [
+          336.72847949947027,
+          360.53471334980713
+        ],
+        "tensor_boundaries": {
+          "p2_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p2_right": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              94,
+              311
+            ],
+            "storage_changed": true
+          },
+          "p3_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              47,
+              156
+            ],
+            "storage_changed": true
+          },
+          "p4_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              24,
+              78
+            ],
+            "storage_changed": true
+          },
+          "c5_left": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              96,
+              12,
+              39
+            ],
+            "storage_changed": true
+          },
+          "objectness": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              9672
+            ],
+            "storage_changed": true
+          },
+          "class_logits": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              9672,
+              4
+            ],
+            "storage_changed": true
+          },
+          "box6": {
+            "source_dtype": "torch.float16",
+            "target_dtype": "torch.float32",
+            "device": "cuda:0",
+            "shape": [
+              1,
+              9672,
+              6
+            ],
+            "storage_changed": true
+          }
+        },
+        "profiler_selected": {
+          "audit.encoder/aten::_to_copy": {
+            "calls": 64,
+            "self_cpu_us": 1103.1339999999914,
+            "device_us": 0.0
+          },
+          "audit.encoder/aten::copy_": {
+            "calls": 64,
+            "self_cpu_us": 2440.209000000007,
+            "device_us": 0.0
+          },
+          "audit.detector/aten::_to_copy": {
+            "calls": 88,
+            "self_cpu_us": 1398.0620000000126,
+            "device_us": 0.0
+          },
+          "audit.detector/aten::copy_": {
+            "calls": 88,
+            "self_cpu_us": 3072.9160000000193,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 26.721999999994296,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 82.40499999999884,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 20.57699999999022,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p2_right/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 52.86699999999837,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 19.64900000001944,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p3_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 43.6189999999915,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.377999999996973,
+            "device_us": 0.0
+          },
+          "fp32_boundary.p4_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 42.40200000000186,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.56899999998859,
+            "device_us": 0.0
+          },
+          "fp32_boundary.c5_left/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 39.52200000001176,
+            "device_us": 0.0
+          },
+          "fp32_boundary.objectness/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.889000000010128,
+            "device_us": 0.0
+          },
+          "fp32_boundary.objectness/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 36.961999999999534,
+            "device_us": 0.0
+          },
+          "fp32_boundary.class_logits/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 17.761000000013155,
+            "device_us": 0.0
+          },
+          "fp32_boundary.class_logits/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 36.3859999999986,
+            "device_us": 0.0
+          },
+          "fp32_boundary.box6/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 21.21700000000419,
+            "device_us": 0.0
+          },
+          "fp32_boundary.box6/aten::copy_": {
+            "calls": 1,
+            "self_cpu_us": 36.00199999999313,
+            "device_us": 0.0
+          },
+          "stereo.roi_sample/aten::_local_scalar_dense": {
+            "calls": 3,
+            "self_cpu_us": 28025.816000000006,
+            "device_us": 0.0
+          },
+          "stereo.cost_volume/aten::copy_": {
+            "calls": 35,
+            "self_cpu_us": 1363.2779999999912,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::_to_copy": {
+            "calls": 142,
+            "self_cpu_us": 2286.254000000132,
+            "device_us": 0.0
+          },
+          "stereo.local_aggregation/aten::copy_": {
+            "calls": 142,
+            "self_cpu_us": 4949.3719999998575,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::copy_": {
+            "calls": 2,
+            "self_cpu_us": 117.3180000000284,
+            "device_us": 0.0
+          },
+          "stereo.disparity_regression/aten::_to_copy": {
+            "calls": 1,
+            "self_cpu_us": 20.41799999997602,
+            "device_us": 0.0
+          }
+        }
+      },
+      "automatic": {
+        "output_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "reference_ids": [
+          9486,
+          9627,
+          9522,
+          9596,
+          8484
+        ],
+        "distances_m": [
+          9.935009002685547,
+          4.653804302215576,
+          8.447586059570312,
+          7.303060054779053,
+          7.606448173522949
+        ]
+      }
+    }
+  }
+}
