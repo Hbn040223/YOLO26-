@@ -29,19 +29,29 @@ def foreground(model, pairs, out):
     return mask, supported
 
 
-def pixel_competition(model, pairs, out, hw, mask, supported, targets, labels):
-    """Replay the existing margin-zero rule on all measurable Car candidates."""
+def pixels_in_box(rows, cols, box):
+    return (cols >= box[0]) & (cols < box[2]) & (rows >= box[1]) & (rows < box[3])
+
+
+def pixel_competition(model, pairs, out, hw, mask, supported, targets, labels, protection=()):
+    """Replay margin-zero competition and optional overlap-limited variants."""
     crop = out.crop
     probability = F.interpolate((out.mask_logits - mask_logit_cutoff(model.mask_threshold)).sigmoid(),
                                 size=out.disparity.shape[-2:], mode="bilinear", align_corners=False)[:, 0]
     projected, valid = project_disparity(SimpleNamespace(absolute=probability, valid=out.validity), crop, hw)
+    if protection:
+        spatial = F.interpolate(out.mask_validity.float(), size=probability.shape[-2:], mode="nearest")[:, 0].bool()
+        overlap_prob, overlap_valid = project_disparity(
+            SimpleNamespace(absolute=probability, valid=out.validity & spatial & torch.isfinite(out.disparity)),
+            crop, hw)
     left, right = pairs.boxes6[:, :4], pairs.boxes6[:, [4, 1, 5, 3]]
     duplicate = (_pairwise_iou(left, left) >= .5) & (_pairwise_iou(right, right) >= .5)
     rivals = (pairs.classes[:, None] == pairs.classes[None, :]) & ~duplicate
     rivals.fill_diagonal_(False)
     boxes = left.new_tensor([target["left_box"] for target in targets]).reshape(-1, 4)
     quality = _pairwise_iou(left, boxes)
-    result = mask.clone()
+    results = {"trial": mask.clone()}
+    results.update({threshold: mask.clone() for threshold in protection})
     pixels = []
     for k in torch.where(supported)[0].tolist():
         h, w = probability.shape[-2:]
@@ -52,9 +62,22 @@ def pixel_competition(model, pairs, out, hw, mask, supported, targets, labels):
             rival_prob = projected[rivals[k]][:, rows, cols]
             rival_support = valid[rivals[k]][:, rows, cols]
             strongest = rival_prob.masked_fill(~rival_support, 0).max(0).values
-            result[k] &= ~((strongest > .5) & (strongest > probability[k]))
+            results["trial"][k] &= ~((strongest > .5) & (strongest > probability[k]))
+            if protection:
+                # Compete only where both decoded left boxes and valid foreground overlap.
+                rival_boxes = left[rivals[k]][:, :, None, None]
+                valid_overlap = (overlap_valid[rivals[k]][:, rows, cols] &
+                                 pixels_in_box(rows, cols, rival_boxes.transpose(0, 1)))
+                rival_max = overlap_prob[rivals[k]][:, rows, cols].masked_fill(~valid_overlap, 0).max(0).values
+                loses_overlap = (pixels_in_box(rows, cols, left[k]) &
+                                 (rival_max > .5) & (rival_max > probability[k]))
+                for threshold in protection:
+                    results[threshold][k] &= ~(loses_overlap & (probability[k] < threshold))
         row = {"pair_id": int(pairs.indices[k]), "total_before": int(mask[k].sum()),
-               "total_after": int(result[k].sum())}
+               "total_after": int(results["trial"][k].sum())}
+        variants = {str(t): {"total_after": int(results[t][k].sum())} for t in protection}
+        if variants:
+            row["overlap_protected"] = variants
         if targets and float(quality[k].max()) >= .5:
             target = targets[int(quality[k].argmax())]
             ids = labels[rows, cols]
@@ -62,10 +85,14 @@ def pixel_competition(model, pairs, out, hw, mask, supported, targets, labels):
             other = (ids > 0) & ~own
             row.update(gt_id=target["id"], gt_depth_m=target["depth_m"])
             if target.get("mask_available", True):
-                row.update(own_before=int((mask[k] & own).sum()), own_after=int((result[k] & own).sum()),
-                           other_before=int((mask[k] & other).sum()), other_after=int((result[k] & other).sum()))
+                row.update(own_before=int((mask[k] & own).sum()), own_after=int((results["trial"][k] & own).sum()),
+                           other_before=int((mask[k] & other).sum()),
+                           other_after=int((results["trial"][k] & other).sum()))
+                for threshold in protection:
+                    variants[str(threshold)].update(own_after=int((results[threshold][k] & own).sum()),
+                                                    other_after=int((results[threshold][k] & other).sum()))
         pixels.append(row)
-    return result, pixels
+    return results, pixels
 
 
 def score(pairs, distances, car, targets, *, bilateral=False, ignore_boxes=()):
@@ -242,7 +269,13 @@ def main():
     for name in ("manifest", "development", "train", "val", "calibration", "prior-manifest"):
         parser.add_argument("--" + name, type=Path)
     parser.add_argument("--case-frame", action="append", default=[], help="run only these development diagnostic frames")
+    parser.add_argument("--overlap-protect", type=float, nargs="+", default=[],
+                        help="additional Mask arms; protect calibrated own probability at or above each threshold")
     args = parser.parse_args()
+    if args.overlap_protect and (args.mode != "mask" or
+                                 any(not .5 < t <= 1 for t in args.overlap_protect)):
+        parser.error("--overlap-protect requires Mask mode and thresholds in (.5, 1]; 1 is overlap-only")
+    protection = sorted(set(args.overlap_protect))
     device = torch.device("cuda:0")
     torch.set_num_threads(2)
     torch.backends.cudnn.deterministic = True
@@ -277,13 +310,26 @@ def main():
         if args.mode == "mask":
             after = distance
             row["pixels"] = []
+            variants = {t: distance for t in protection}
             if out is not None:
-                trial, row["pixels"] = pixel_competition(model, pairs, out, hw, mask, supported, targets, labels)
-                valid = torch.where(supported[:, None, None], trial, out.validity)
-                after = near10_measure(out.disparity, valid, calib)
+                masks, row["pixels"] = pixel_competition(model, pairs, out, hw, mask, supported, targets, labels,
+                                                        protection)
+                for arm, trial in masks.items():
+                    valid = torch.where(supported[:, None, None], trial, out.validity)
+                    measured = near10_measure(out.disparity, valid, calib)
+                    if arm == "trial":
+                        after = measured
+                    else:
+                        variants[arm] = measured
             row["trial"] = score(pairs, after, car, targets, ignore_boxes=ignore_boxes)
             row["distance_before"] = dict(zip(map(str, pairs.indices.tolist()), finite_list(distance)))
             row["distance_after"] = dict(zip(map(str, pairs.indices.tolist()), finite_list(after)))
+            if variants:
+                row["overlap_protected"] = {
+                    str(t): {"score": score(pairs, d, car, targets, ignore_boxes=ignore_boxes),
+                             "distances": dict(zip(map(str, pairs.indices.tolist()), finite_list(d)))}
+                    for t, d in variants.items()
+                }
         else:
             trial = run_arm(model, left, pyramid, dense, geometry, calib, True)
             truth = image_array(frame["disparity"], np.float32).to(device) / 256 if frame.get("disparity") else None
@@ -308,7 +354,8 @@ def main():
     write_json(args.output, {"mode": args.mode, "weights_sha256": digest(args.weights), "script_sha256": digest(Path(__file__)),
                              "manifest_sha256": digest(args.manifest) if args.manifest else digest(args.val),
                              "settings": {"dmax_roi": 16, "bins": 33, "aggregation_width": 32,
-                                          "cost": "bmm", "aggregation": "fp32", "mask_margin": 0, "score": .48},
+                                          "cost": "bmm", "aggregation": "fp32", "mask_margin": 0, "score": .48,
+                                          "overlap_protect": protection},
                              "totals": totals, "frames": rows})
 
 
