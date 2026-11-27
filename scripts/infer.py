@@ -56,7 +56,7 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
                          apply_paired_nms=None, paired_nms_iou=.5, mask_threshold=None, roi_max_distance=None,
                          bf_px_m=None, cx_delta_px=None, crop_top_px=0, containment_threshold=None,
                          near10_mode=None, near10_prefilter_m=15., near10_mask_iou=.60,
-                         near10_review_box_iou=None, idisp_cost_backend="loop"):
+                         near10_review_box_iou=None, idisp_cost_backend="loop", recenter_left_edge=False):
     bundle = torch.load(weights, map_location="cpu", weights_only=True)
     config = bundle["config"]
     channels = config["adapter_channels"]
@@ -72,6 +72,10 @@ def load_published_model(weights, openstereo_source, device, *, score=.40, topk=
         mask_head_variant=config.get("mask_head_variant", "light"),
         idisp_cost_backend=idisp_cost_backend,
     )
+    if recenter_left_edge and (config["roi_sampling"] != "fixed_56" or
+                              near10_mode == "range-dedup" or roi_max_distance is not None):
+        raise ValueError("left-edge recentering requires fixed_56 and ordinary instance dispatch")
+    instance.recenter_left_edge = recenter_left_edge
     selection = None
     if roi_max_distance is not None:
         if bf_px_m is None or cx_delta_px is None:
@@ -106,6 +110,8 @@ def main() -> None:
     parser.add_argument("--right", type=Path, required=True)
     parser.add_argument("--device", default="cuda:0")
     add_idisp_cost_argument(parser)
+    parser.add_argument("--recenter-left-edge", action="store_true",
+                        help="experimentally recenter doubly left-truncated fixed_56 RoIs")
     parser.add_argument("--score", type=parse_score_threshold, default=.40)
     parser.add_argument("--paired-nms", action="store_true", help="opt in to class-aware stereo pair suppression")
     parser.add_argument("--paired-nms-iou", type=float, default=.5)
@@ -151,6 +157,7 @@ def main() -> None:
         near10_mode=near10_mode, near10_prefilter_m=args.near10_prefilter_m, near10_mask_iou=args.near10_mask_iou,
         near10_review_box_iou=args.near10_review_box_iou,
         idisp_cost_backend=args.idisp_cost_backend,
+        recenter_left_edge=args.recenter_left_edge,
     )
     if not model.foreground_class_indices:
         warnings.warn("This checkpoint has no supported foreground classes. Use foreground_evaluation.pt for Car foreground.",

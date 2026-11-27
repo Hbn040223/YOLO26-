@@ -38,6 +38,7 @@ class InstanceDisparityOutput:
 
 
 class StereoLocalInstanceHead(nn.Module):
+    recenter_left_edge = False
     def __init__(
         self, channels: int, dmax_roi: int, hidden_channels: int = 32, *,
         roi_sampling: str = "native_pad", mask_head_variant: str = "light",
@@ -64,12 +65,20 @@ class StereoLocalInstanceHead(nn.Module):
     ) -> tuple[RoiDisparity, CropMetadata, Tensor, Tensor]:
         with record_function("stereo.roi_sample"):
             crop = make_pair_crop_windows(boxes6, image_height, image_width, margin, roi_sampling=self.roi_sampling,
-                                          fit_vertical_extent=fit_vertical_extent)
+                                          fit_vertical_extent=fit_vertical_extent,
+                                          recenter_left_edge=self.recenter_left_edge)
             left_roi, right_roi, spatial_valid, _ = self.roi(pyramid.p2_left, pyramid.p2_right, boxes6, crop)
             p3_roi, _ = self.p3_roi(pyramid.p3_left, crop)
             p4_roi, _ = self.p4_roi(pyramid.p4_left, crop)
         attention = AttentionPyramid(left_roi, p3_roi, p4_roi)
-        disparity = self.idisp(left_roi, right_roi, attention, crop, spatial_valid)
+        if self.recenter_left_edge:
+            columns = torch.arange(right_roi.shape[-1], device=right_roi.device) + .5
+            x = crop.c_r[:, None] + columns * (crop.c / crop.w_roi)[:, None]
+            right_valid = ((x >= 0) & (x < image_width))[:, None, None, :].expand_as(spatial_valid)
+            disparity = self.idisp(left_roi, right_roi, attention, crop, spatial_valid,
+                                   right_spatial_valid=right_valid)
+        else:
+            disparity = self.idisp(left_roi, right_roi, attention, crop, spatial_valid)
         return disparity, crop, left_roi, spatial_valid
 
     def sample_mask_roi(self, p2_left: Tensor, boxes6: Tensor, image_height: int, image_width: int,

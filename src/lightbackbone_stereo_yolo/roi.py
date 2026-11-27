@@ -26,6 +26,7 @@ class CropMetadata:
 def make_pair_crop_windows(
     boxes6: Tensor, image_height: int, image_width: int, margin: float, *,
     roi_sampling: str = "native_pad", fit_vertical_extent: bool = False,
+    recenter_left_edge: bool = False,
 ) -> CropMetadata:
     """Make paired continuous 2D windows with shared vertical geometry."""
     if boxes6.ndim != 2 or boxes6.shape[1] != 6:
@@ -41,6 +42,12 @@ def make_pair_crop_windows(
         raise ValueError("a paired crop is wider than the image")
     c_l = torch.minimum(left_start.clamp_min(0), image_width - c).clamp_min(0)
     c_r = torch.minimum(right_start.clamp_min(0), image_width - c).clamp_min(0)
+    if recenter_left_edge:
+        if roi_sampling != "fixed_56":
+            raise ValueError("left-edge recentering requires fixed_56")
+        center_delta = ((boxes6[:, 0] + boxes6[:, 2]) - (boxes6[:, 4] + boxes6[:, 5])) * .5
+        both_truncated = (boxes6[:, 0] <= 0) & (boxes6[:, 4] <= 0) & (center_delta > 0)
+        c_r = torch.where(both_truncated, c_l - center_delta, c_r)
     top, bottom = boxes6[:, 1] - margin, boxes6[:, 3] + margin
     h_crop = bottom - top
     if fit_vertical_extent:

@@ -12,6 +12,19 @@ from lightbackbone_stereo_yolo.local_aggregation import AttentionPyramid
 
 
 class LocalDisparityContractTest(unittest.TestCase):
+    def test_left_edge_crop_and_separate_right_validity(self):
+        boxes = torch.tensor([[0., 4., 80., 40., 0., 40.], [20., 4., 80., 40., 18., 70.]])
+        base = make_pair_crop_windows(boxes, 100, 160, 16., roi_sampling="fixed_56")
+        crop = make_pair_crop_windows(boxes, 100, 160, 16., roi_sampling="fixed_56", recenter_left_edge=True)
+        self.assertEqual((crop.c_l-crop.c_r).tolist(), [20., float(base.c_l[1]-base.c_r[1])])
+        x = torch.ones(1, 1, 1, 3)
+        right = torch.tensor([[[[False, True, True]]]])
+        for backend in ("loop", "bmm"):
+            result = build_local_cost_volume(x,x,ResidualSearch(1),x.bool(),LearnableTemperature(),
+                                             backend=backend,right_spatial_valid=right)
+            self.assertEqual(result.valid_bins[0,:,0,0].tolist(), [True,False,False])
+            self.assertFalse(result.valid_bins[0,2,0,1])
+
     def test_fixed_grid_mask_shortcut_and_forced_fp32(self):
         head = RegularizedIDispHead(4, 1, 4).eval()
         meta = make_pair_crop_windows(torch.tensor([[8., 8., 24., 24., 6., 22.]]), 64, 64, 0,
